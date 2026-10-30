@@ -1,0 +1,425 @@
+import React, { useState, useEffect } from 'react';
+import { Navbar } from './components/Navbar';
+import { TodaySession } from './components/TodaySession';
+import { CurriculumRoadmap } from './components/CurriculumRoadmap';
+import { AIMentorView } from './components/AIMentorView';
+import { StudySquadsView } from './components/StudySquadsView';
+import { ScheduleAlertsView } from './components/ScheduleAlertsView';
+import { CreateTrackerModal } from './components/CreateTrackerModal';
+import { Tracker, StudySquad } from './types';
+import { PRESET_TRACKERS, INITIAL_SQUADS } from './utils/mockPresets';
+import { soundAlert } from './utils/audioAlert';
+import { Bell, Play, X } from 'lucide-react';
+
+export default function App() {
+  // Navigation tab state
+  const [activeTab, setActiveTab] = useState<'today' | 'curriculum' | 'mentor' | 'squads' | 'schedule'>('today');
+
+  // Trackers state with localStorage persistence
+  const [trackers, setTrackers] = useState<Tracker[]>(() => {
+    try {
+      const saved = localStorage.getItem('devtrack_trackers');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse saved trackers:', e);
+    }
+    return PRESET_TRACKERS;
+  });
+
+  const [activeTrackerId, setActiveTrackerId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('devtrack_active_tracker_id');
+      if (saved) return saved;
+    } catch {}
+    return PRESET_TRACKERS[0]?.id || '';
+  });
+
+  // Squads state with localStorage persistence
+  const [squads, setSquads] = useState<StudySquad[]>(() => {
+    try {
+      const saved = localStorage.getItem('devtrack_squads');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_SQUADS;
+  });
+
+  const [currentSquadId, setCurrentSquadId] = useState<string>(() => {
+    return INITIAL_SQUADS[0]?.id || '';
+  });
+
+  // Streak state
+  const [streakDays, setStreakDays] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('devtrack_streak');
+      if (saved) return parseInt(saved, 10);
+    } catch {}
+    return 4;
+  });
+
+  // Sound mute state
+  const [isMuted, setIsMuted] = useState<boolean>(() => soundAlert.isMuted);
+
+  // Create Modal state
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+
+  // Active Scheduled Session In-App Alert banner
+  const [scheduledAlertBanner, setScheduledAlertBanner] = useState<string | null>(null);
+  const [lastAlertFiredDate, setLastAlertFiredDate] = useState<string>('');
+
+  // Persist trackers
+  useEffect(() => {
+    try {
+      localStorage.setItem('devtrack_trackers', JSON.stringify(trackers));
+    } catch (e) {
+      console.warn('LocalStorage save error:', e);
+    }
+  }, [trackers]);
+
+  // Persist active tracker ID
+  useEffect(() => {
+    try {
+      localStorage.setItem('devtrack_active_tracker_id', activeTrackerId);
+    } catch {}
+  }, [activeTrackerId]);
+
+  // Persist squads
+  useEffect(() => {
+    try {
+      localStorage.setItem('devtrack_squads', JSON.stringify(squads));
+    } catch {}
+  }, [squads]);
+
+  // Persist streak
+  useEffect(() => {
+    try {
+      localStorage.setItem('devtrack_streak', streakDays.toString());
+    } catch {}
+  }, [streakDays]);
+
+  const activeTracker = trackers.find(t => t.id === activeTrackerId) || trackers[0] || null;
+
+  // Toggle Mute
+  const handleToggleMute = () => {
+    const next = !isMuted;
+    setIsMuted(next);
+    soundAlert.isMuted = next;
+  };
+
+  // Background interval: Check if current time matches scheduled time
+  useEffect(() => {
+    const checkScheduledAlarm = () => {
+      if (!activeTracker) return;
+
+      const now = new Date();
+      const currentDay = now.getDay();
+      if (!activeTracker.studyDays.includes(currentDay)) return;
+
+      const currentHour = now.getHours();
+      const currentMin = now.getMinutes();
+
+      const [targetHStr, targetMStr] = activeTracker.scheduledTime.split(':');
+      const targetHour = parseInt(targetHStr || '20', 10);
+      const targetMin = parseInt(targetMStr || '0', 10);
+
+      const todayStr = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}-${targetHour}:${targetMin}`;
+
+      if (currentHour === targetHour && currentMin === targetMin && lastAlertFiredDate !== todayStr) {
+        setLastAlertFiredDate(todayStr);
+        soundAlert.playSessionAlertChime();
+        soundAlert.fireNotification(`Time for Study: ${activeTracker.title}!`, {
+          body: `Your daily ${activeTracker.dailyMinutesTarget}-minute study session is scheduled now. Let's make progress!`,
+        });
+        setScheduledAlertBanner(`Time to study! Your scheduled session for "${activeTracker.title}" has arrived (${activeTracker.scheduledTime}).`);
+      }
+    };
+
+    const interval = setInterval(checkScheduledAlarm, 15000);
+    return () => clearInterval(interval);
+  }, [activeTracker, lastAlertFiredDate]);
+
+  // Complete a lesson
+  const handleCompleteLesson = (lessonId: string, notes?: string, minutesStudied: number = 45) => {
+    setTrackers(prevTrackers =>
+      prevTrackers.map(t => {
+        if (t.id !== activeTrackerId) return t;
+        return {
+          ...t,
+          modules: t.modules.map(mod => ({
+            ...mod,
+            lessons: mod.lessons.map(les => {
+              if (les.id === lessonId) {
+                return {
+                  ...les,
+                  completed: true,
+                  completedAt: new Date().toISOString(),
+                  notes: notes !== undefined && notes.trim() !== '' ? notes : les.notes,
+                };
+              }
+              return les;
+            }),
+          })),
+        };
+      })
+    );
+
+    // Increment streak
+    setStreakDays(prev => prev + 1);
+
+    // Update squad member stats for current user
+    setSquads(prevSquads =>
+      prevSquads.map(sq => ({
+        ...sq,
+        members: sq.members.map(m => {
+          if (m.isCurrentUser) {
+            return {
+              ...m,
+              streakDays: m.streakDays + 1,
+              weeklyMinutes: m.weeklyMinutes + minutesStudied,
+              completedToday: true,
+            };
+          }
+          return m;
+        }),
+      }))
+    );
+  };
+
+  // Toggle lesson completed/uncompleted
+  const handleToggleLesson = (lessonId: string) => {
+    setTrackers(prevTrackers =>
+      prevTrackers.map(t => {
+        if (t.id !== activeTrackerId) return t;
+        return {
+          ...t,
+          modules: t.modules.map(mod => ({
+            ...mod,
+            lessons: mod.lessons.map(les => {
+              if (les.id === lessonId) {
+                const nextCompleted = !les.completed;
+                if (nextCompleted) soundAlert.playCompletionChime();
+                return {
+                  ...les,
+                  completed: nextCompleted,
+                  completedAt: nextCompleted ? new Date().toISOString() : undefined,
+                };
+              }
+              return les;
+            }),
+          })),
+        };
+      })
+    );
+  };
+
+  // Update notes for a lesson
+  const handleUpdateNotes = (lessonId: string, notes: string) => {
+    setTrackers(prevTrackers =>
+      prevTrackers.map(t => {
+        if (t.id !== activeTrackerId) return t;
+        return {
+          ...t,
+          modules: t.modules.map(mod => ({
+            ...mod,
+            lessons: mod.lessons.map(les => (les.id === lessonId ? { ...les, notes } : les)),
+          })),
+        };
+      })
+    );
+  };
+
+  // Save new tracker
+  const handleSaveTracker = (newTracker: Tracker) => {
+    setTrackers(prev => [newTracker, ...prev]);
+    setActiveTrackerId(newTracker.id);
+    setActiveTab('today');
+  };
+
+  // Update schedule configuration
+  const handleUpdateSchedule = (newTime: string, newDuration: number, newDays: number[]) => {
+    setTrackers(prev =>
+      prev.map(t =>
+        t.id === activeTrackerId
+          ? {
+              ...t,
+              scheduledTime: newTime,
+              dailyMinutesTarget: newDuration,
+              studyDays: newDays,
+            }
+          : t
+      )
+    );
+  };
+
+  // Send cheer in squad
+  const handleSendCheer = (memberId: string) => {
+    setSquads(prev =>
+      prev.map(sq => {
+        if (sq.id !== currentSquadId) return sq;
+        return {
+          ...sq,
+          members: sq.members.map(m => (m.id === memberId ? { ...m, cheerCount: m.cheerCount + 1 } : m)),
+        };
+      })
+    );
+  };
+
+  // Nudge teammate
+  const handleNudge = (_memberId: string) => {
+    // Recorded in feed
+  };
+
+  // Join squad
+  const handleJoinSquad = (code: string) => {
+    const existing = squads.find(s => s.inviteCode.toUpperCase() === code.toUpperCase());
+    if (existing) {
+      setCurrentSquadId(existing.id);
+    } else {
+      // Create new dynamic squad with this code
+      const newSquad: StudySquad = {
+        id: `squad-${Date.now()}`,
+        name: `Cohort ${code}`,
+        trackName: activeTracker?.title || "Computer Science Mastery",
+        description: `Custom study cohort joined with code ${code}`,
+        inviteCode: code,
+        squadGoal: 'Master core concepts and keep daily streak alive',
+        totalGoalCompletedPercent: 15,
+        members: [
+          {
+            id: 'member-user',
+            name: 'You (Student)',
+            avatarUrl: '/src/assets/images/avatar_student_alex_1793187697984.jpg',
+            streakDays: streakDays,
+            weeklyMinutes: 180,
+            currentLesson: 'Active Module',
+            completedToday: false,
+            cheerCount: 0,
+            isCurrentUser: true,
+          },
+        ],
+      };
+      setSquads(prev => [newSquad, ...prev]);
+      setCurrentSquadId(newSquad.id);
+    }
+  };
+
+  // Create squad
+  const handleCreateSquad = (name: string, track: string, goal: string) => {
+    const newSquad: StudySquad = {
+      id: `squad-${Date.now()}`,
+      name,
+      trackName: track || activeTracker?.title || "Computer Science",
+      description: `Active study squad created by you for peer accountability.`,
+      inviteCode: `DEV-${Math.floor(1000 + Math.random() * 9000)}`,
+      squadGoal: goal || 'Finish all scheduled lessons on time',
+      totalGoalCompletedPercent: 0,
+      members: [
+        {
+          id: 'member-user',
+          name: 'You (Student)',
+          avatarUrl: '/src/assets/images/avatar_student_alex_1793187697984.jpg',
+          streakDays: streakDays,
+          weeklyMinutes: 120,
+          currentLesson: 'Active Session',
+          completedToday: false,
+          cheerCount: 0,
+          isCurrentUser: true,
+        },
+      ],
+    };
+    setSquads(prev => [newSquad, ...prev]);
+    setCurrentSquadId(newSquad.id);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 font-sans">
+      {/* Scheduled Alert Floating Banner if fired */}
+      {scheduledAlertBanner && (
+        <div className="bg-indigo-600 text-white px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-medium z-50 shadow-md">
+          <div className="flex items-center gap-2 max-w-4xl mx-auto">
+            <Bell className="w-4 h-4 animate-bounce" />
+            <span>{scheduledAlertBanner}</span>
+            <button
+              onClick={() => {
+                setActiveTab('today');
+                setScheduledAlertBanner(null);
+              }}
+              className="ml-3 px-3 py-1 bg-white text-indigo-700 rounded-md font-semibold hover:bg-indigo-50 cursor-pointer flex items-center gap-1"
+            >
+              <Play className="w-3 h-3 fill-indigo-700" />
+              <span>Start Now</span>
+            </button>
+          </div>
+          <button
+            onClick={() => setScheduledAlertBanner(null)}
+            className="p-1 hover:bg-indigo-700 rounded cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Top Bar Navigation */}
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        streakDays={streakDays}
+        isMuted={isMuted}
+        toggleMute={handleToggleMute}
+        onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        scheduledTime={activeTracker?.scheduledTime || '20:00'}
+      />
+
+      {/* Main View Router */}
+      <main className="flex-1 pb-16">
+        {activeTab === 'today' && (
+          <TodaySession
+            activeTracker={activeTracker}
+            streakDays={streakDays}
+            onCompleteLesson={handleCompleteLesson}
+            onSwitchToMentor={() => setActiveTab('mentor')}
+            onOpenCreateModal={() => setIsCreateModalOpen(true)}
+          />
+        )}
+
+        {activeTab === 'curriculum' && activeTracker && (
+          <CurriculumRoadmap
+            tracker={activeTracker}
+            onToggleLesson={handleToggleLesson}
+            onUpdateNotes={handleUpdateNotes}
+            onOpenCreateModal={() => setIsCreateModalOpen(true)}
+          />
+        )}
+
+        {activeTab === 'mentor' && activeTracker && (
+          <AIMentorView tracker={activeTracker} streakDays={streakDays} />
+        )}
+
+        {activeTab === 'squads' && (
+          <StudySquadsView
+            squads={squads}
+            currentSquadId={currentSquadId}
+            onSelectSquad={setCurrentSquadId}
+            onSendCheer={handleSendCheer}
+            onNudge={handleNudge}
+            onJoinSquad={handleJoinSquad}
+            onCreateSquad={handleCreateSquad}
+          />
+        )}
+
+        {activeTab === 'schedule' && activeTracker && (
+          <ScheduleAlertsView
+            tracker={activeTracker}
+            onUpdateSchedule={handleUpdateSchedule}
+          />
+        )}
+      </main>
+
+      {/* Create / Import Tracker Modal */}
+      <CreateTrackerModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSaveTracker={handleSaveTracker}
+      />
+    </div>
+  );
+}

@@ -1,0 +1,6 @@
+{
+  "name": "DevTrack - Smart Study & Squad Tracker",
+  "description": "Personalized study schedule and squad accountability platform that turns YouTube playlists and syllabi into timed daily learning paths with AI recaps and concept mentoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
