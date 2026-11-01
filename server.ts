@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { buildSmartConceptFallback } from './src/utils/aiMentorCache';
+import { buildDynamicTrackerFromInput } from './src/utils/studyWorkspaceLogic';
 
 dotenv.config();
 
@@ -58,15 +59,38 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallbackMessage: string
 
 // Endpoint: Extract & Generate Personalized Curriculum from URL or Syllabus
 app.post('/api/extract-resource', async (req, res) => {
-  try {
-    const { url, rawTopic, dailyMinutes = 60 } = req.body;
+  const { url = '', rawTopic = '', dailyMinutes = 60 } = req.body || {};
+  let resolvedTitle = rawTopic && !/^https?:\/\//i.test(rawTopic.trim()) ? rawTopic.trim() : '';
+  let resolvedInstructor = '';
 
+  // Attempt fast YouTube oEmbed lookup if a YouTube URL is provided so raw links get their real video/playlist title
+  if (/youtube\.com|youtu\.be/i.test(url)) {
+    try {
+      const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url.trim())}&format=json`;
+      const oembedRes = await withTimeout(fetch(oembedUrl), 2500, 'oEmbed timeout');
+      if (oembedRes.ok) {
+        const oembedJson = (await oembedRes.json()) as any;
+        if (oembedJson?.title && !resolvedTitle) {
+          resolvedTitle = String(oembedJson.title).trim();
+        }
+        if (oembedJson?.author_name) {
+          resolvedInstructor = String(oembedJson.author_name).trim();
+        }
+      }
+    } catch {
+      // Proceed with topic/URL inference if oEmbed is unavailable
+    }
+  }
+
+  try {
     const prompt = `You are a world-class Computer Science and Software Engineering curriculum architect.
 A student wants to learn the following subject or playlist resource:
-Resource URL or Description: "${url || rawTopic}"
+Resource URL: "${url}"
+Topic / Course Title: "${resolvedTitle || rawTopic || url}"
+${resolvedInstructor ? `Instructor / Channel: "${resolvedInstructor}"` : ''}
 Target daily study time: ${dailyMinutes} minutes.
 
-Generate a complete, structured learning path broken down into ordered modules and bite-sized video lessons (aim for 12 to 18 total lessons grouped into 3-4 logical modules).
+Generate a complete, structured learning path broken down into ordered modules and bite-sized video lessons (aim for 6 to 9 total lessons grouped into 3 logical modules) specifically tailored to "${resolvedTitle || rawTopic || url}".
 Respond strictly in valid JSON matching this schema:
 {
   "title": string,
@@ -103,17 +127,38 @@ Respond strictly in valid JSON matching this schema:
           responseMimeType: 'application/json',
         },
       }),
-      8000,
+      5000,
       'Curriculum extraction timed out'
     );
 
     const parsed = JSON.parse(response.text || '{}');
-    return res.json({ success: true, data: parsed });
+    if (resolvedTitle && (!parsed.title || /^https?:\/\//i.test(parsed.title))) {
+      parsed.title = resolvedTitle;
+    }
+    if (resolvedInstructor && !parsed.instructor) {
+      parsed.instructor = resolvedInstructor;
+    }
+
+    const dynamicTracker = buildDynamicTrackerFromInput({
+      inputUrl: url || rawTopic,
+      rawTopic: resolvedTitle || rawTopic,
+      extractedData: parsed,
+      dailyMinutes,
+    });
+
+    return res.json({ success: true, data: dynamicTracker });
   } catch (error: any) {
-    console.error('Error extracting resource:', error?.message || error);
-    return res.status(500).json({
-      success: false,
-      error: error?.message || 'Failed to analyze learning resource with AI',
+    console.warn('Using dynamic topic curriculum builder:', error?.message || error);
+    const dynamicTracker = buildDynamicTrackerFromInput({
+      inputUrl: url || rawTopic,
+      rawTopic: resolvedTitle || rawTopic,
+      extractedData: resolvedInstructor ? { title: resolvedTitle, instructor: resolvedInstructor } : undefined,
+      dailyMinutes,
+    });
+    return res.json({
+      success: true,
+      data: dynamicTracker,
+      fallback: true,
     });
   }
 });

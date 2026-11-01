@@ -26,6 +26,8 @@ import {
   calculateCourseProgress,
   generateDailyStudyChecklist,
   filterStudyTasks,
+  getCourseThemeTokens,
+  resolveLessonVideoUrl,
 } from '../utils/studyWorkspaceLogic';
 import { ConfettiCelebration } from './ConfettiCelebration';
 
@@ -75,12 +77,14 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     minutes: defaultMinutes,
   });
 
-  // Sync timer & load tasks when tracker changes
+  // Sync timer, reset session state & load course-specific tasks whenever activeTracker or courseUrl changes
   useEffect(() => {
     if (activeTracker) {
       setSecondsRemaining(activeTracker.dailyMinutesTarget * 60);
       setIsTimerRunning(false);
       setHasStartedSession(false);
+      setSessionNotes('');
+      setTaskFilter('all');
 
       try {
         const savedTasks = localStorage.getItem(`devtrack_custom_tasks_${activeTracker.id}`);
@@ -90,14 +94,14 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
           setCustomTasks([
             {
               id: `default-task-1-${activeTracker.id}`,
-              title: 'Solve 1 related coding problem without looking at hints',
+              title: `Complete 1 hands-on coding exercise for ${activeTracker.title}`,
               category: 'practice',
               estimatedMinutes: 25,
               completed: false,
             },
             {
               id: `default-task-2-${activeTracker.id}`,
-              title: 'Summarize time & space complexity in study notes',
+              title: `Summarize core concepts from today's ${activeTracker.category} lecture`,
               category: 'revision',
               estimatedMinutes: 10,
               completed: false,
@@ -119,7 +123,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
         setBuiltInChecks({});
       }
     }
-  }, [activeTracker?.id, activeTracker?.dailyMinutesTarget]);
+  }, [activeTracker?.id, activeTracker?.sourceUrl, activeTracker?.title, activeTracker?.dailyMinutesTarget]);
 
   // Persist custom tasks
   useEffect(() => {
@@ -402,7 +406,9 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-2 max-w-2xl">
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span className="font-semibold text-indigo-600">{activeTracker.category}</span>
+                <span className={`font-semibold ${getCourseThemeTokens(activeTracker.category).accentText}`}>
+                  {activeTracker.category}
+                </span>
                 <span aria-hidden="true">·</span>
                 <span>Instructor: {activeTracker.instructor}</span>
                 <span aria-hidden="true">·</span>
@@ -416,7 +422,8 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 DevTrack: {activeTracker.title}
               </h1>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Check off your daily study tasks below, watch your scheduled lesson, and clear any concept doubts with your AI Professor Mentor.
+                {activeTracker.description ||
+                  'Check off your daily study tasks below, watch your scheduled lesson, and clear any concept doubts with your AI Professor Mentor.'}
               </p>
             </div>
 
@@ -431,13 +438,25 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-indigo-600 rounded-full transition-all duration-500"
+                    className={`h-full ${getCourseThemeTokens(activeTracker.category).progressBg} rounded-full transition-all duration-500`}
                     style={{ width: `${courseProgress.percent}%` }}
                   />
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {activeTracker.sourceUrl && /^https?:\/\//i.test(activeTracker.sourceUrl) && (
+                  <a
+                    href={activeTracker.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
+                    title="Open the course's main YouTube playlist or video URL"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Course Playlist</span>
+                  </a>
+                )}
                 <button
                   type="button"
                   onClick={onSwitchToCurriculum}
@@ -671,7 +690,17 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
               {/* Action Buttons: Watch Video + Ask Professor Mentor + Mark Completed */}
               <div className="flex flex-wrap items-center gap-3 pt-1">
                 <a
-                  href={currentLesson.videoUrl}
+                  href={
+                    activeTracker.id === 'tracker-dsa-striver' || activeTracker.id === 'tracker-fullstack-mern'
+                      ? currentLesson.videoUrl
+                      : resolveLessonVideoUrl(
+                          activeTracker.sourceUrl,
+                          currentLesson.videoUrl,
+                          courseProgress.completed,
+                          activeTracker.title,
+                          currentLesson.title
+                        )
+                  }
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"

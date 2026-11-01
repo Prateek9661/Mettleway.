@@ -6,6 +6,7 @@ import {
   getCurrentUncompletedLesson,
   generateDailyStudyChecklist,
   completeLessonInTracker,
+  buildDynamicTrackerFromInput,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -204,4 +205,71 @@ describe('Integration Tests: Live Server SEO HTML, robots.txt, and sitemap.xml D
     assert.ok(sitemapText.includes('<loc>'));
   });
 });
+
+describe('Integration Tests: Dynamic Course Addition, Switching & YouTube URL Synchronization', () => {
+  test('adding a custom Python YouTube course via /api/extract-resource and switching active course updates title, theme, 0% progress, syllabus, checklist, and YouTube links', async () => {
+    // 1. Initial state: user is on PRESET_TRACKERS[0] (Striver DSA)
+    const dsaTracker = PRESET_TRACKERS[0];
+    const dsaLesson = getCurrentUncompletedLesson(dsaTracker);
+    assert.equal(dsaLesson?.title, 'Lec 3: Hashing & Frequency Counting Maps');
+    assert.equal(calculateCourseProgress(dsaTracker).completed, 2);
+
+    // 2. User submits a custom Python YouTube course URL
+    const pythonYoutubeUrl = 'https://www.youtube.com/playlist?list=PLu0W_9lII9agwh1XjRt242xIpHhPT2llg';
+    let extractedServerData: any = null;
+
+    const baseUrl = 'http://localhost:3000';
+    try {
+      const res = await fetch(`${baseUrl}/api/extract-resource`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: pythonYoutubeUrl,
+          rawTopic: 'Python Programming Full Course',
+          dailyMinutes: 45,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as any;
+        if (json.success && json.data) {
+          extractedServerData = json.data;
+        }
+      }
+    } catch {
+      // Server offline fallback path also tested
+    }
+
+    // 3. Build the new tracker and switch active course to it
+    const newPythonTracker = buildDynamicTrackerFromInput({
+      inputUrl: pythonYoutubeUrl,
+      rawTopic: 'Python Programming Full Course',
+      extractedData: extractedServerData,
+      dailyMinutes: 45,
+      scheduledTime: '21:00',
+      studyDays: [1, 2, 3, 4, 5],
+      trackerId: 'tracker-python-live',
+    });
+
+    // 4. Verify complete dashboard context synchronization:
+    // - Course progress resets to 0%
+    const newProgress = calculateCourseProgress(newPythonTracker);
+    assert.equal(newProgress.completed, 0);
+    assert.equal(newProgress.percent, 0);
+
+    // - Active lesson swaps out old DSA "Lec 3: Hashing" and loads Lesson 1 of the new course
+    const newActiveLesson = getCurrentUncompletedLesson(newPythonTracker);
+    assert.ok(newActiveLesson);
+    assert.notEqual(newActiveLesson.title, 'Lec 3: Hashing & Frequency Counting Maps');
+    assert.ok(
+      newActiveLesson.videoUrl.includes('PLu0W_9lII9agwh1XjRt242xIpHhPT2llg'),
+      `Active lesson videoUrl (${newActiveLesson.videoUrl}) must point to the newly added YouTube URL`
+    );
+
+    // - Daily task checklist dynamically updates to the new course's active lesson
+    const newChecklist = generateDailyStudyChecklist(newActiveLesson, {}, [], '');
+    assert.ok(newChecklist[0].title.includes(newActiveLesson.title));
+    assert.equal(newChecklist[0].linkedLessonId, newActiveLesson.id);
+  });
+});
+
 

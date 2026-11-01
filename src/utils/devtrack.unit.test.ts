@@ -8,6 +8,10 @@ import {
   generateDailyStudyChecklist,
   filterStudyTasks,
   completeLessonInTracker,
+  buildDynamicTrackerFromInput,
+  resolveLessonVideoUrl,
+  sanitizeAndSyncTracker,
+  getCourseThemeTokens,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -240,4 +244,97 @@ describe('Unit Tests: SEO Metadata, Visible H1, robots.txt, and sitemap.xml (TDD
     assert.ok(sitemapContent.includes('</urlset>'));
   });
 });
+
+describe('Unit Tests: Dynamic Course Creation, Curriculum Reset & YouTube URL Binding (TDD)', () => {
+  test('buildDynamicTrackerFromInput generates a Python course with 0% progress, Python modules, and bound YouTube links (never Striver DSA fallback)', () => {
+    const pythonUrl = 'https://www.youtube.com/playlist?list=PLu0W_9lII9agwh1XjRt242xIpHhPT2llg';
+    const tracker = buildDynamicTrackerFromInput({
+      inputUrl: pythonUrl,
+      rawTopic: 'Python Full Course for Beginners',
+      dailyMinutes: 60,
+      scheduledTime: '19:30',
+      studyDays: [1, 2, 3, 4, 5],
+      trackerId: 'tracker-python-test',
+    });
+
+    assert.equal(tracker.id, 'tracker-python-test');
+    assert.ok(tracker.title.toLowerCase().includes('python'), `Expected Python title, got ${tracker.title}`);
+    assert.notEqual(tracker.category, 'DSA', 'Python course should not default to DSA category');
+    assert.equal(tracker.sourceUrl, pythonUrl);
+
+    // Must start at 0% progress (no pre-completed DSA lessons!)
+    const progress = calculateCourseProgress(tracker);
+    assert.equal(progress.completed, 0);
+    assert.equal(progress.percent, 0);
+    assert.ok(progress.total >= 6);
+
+    // Must NOT contain stale Striver DSA lesson "Lec 3: Hashing & Frequency Counting Maps"
+    const allLessonTitles = tracker.modules.flatMap(m => m.lessons.map(l => l.title));
+    assert.ok(
+      !allLessonTitles.some(t => t.includes('Hashing & Frequency Counting Maps')),
+      'Must not contain stale Striver DSA lessons'
+    );
+    assert.ok(
+      allLessonTitles.some(t => t.toLowerCase().includes('python')),
+      'Lessons must be tailored to Python'
+    );
+
+    // Every lesson videoUrl must bind to the active course YouTube playlist URL
+    tracker.modules.forEach(mod => {
+      mod.lessons.forEach(les => {
+        assert.ok(
+          les.videoUrl.includes('PLu0W_9lII9agwh1XjRt242xIpHhPT2llg'),
+          `Lesson videoUrl (${les.videoUrl}) must dynamically bind to the new YouTube playlist URL`
+        );
+        assert.ok(
+          !les.videoUrl.includes('KEs5UyBJ39g'),
+          'Lesson videoUrl must never point to hardcoded Striver video'
+        );
+      });
+    });
+  });
+
+  test('resolveLessonVideoUrl binds single YouTube video URLs, playlist URLs with index, and topic search queries', () => {
+    const playlistUrl = 'https://www.youtube.com/playlist?list=PL12345';
+    assert.equal(
+      resolveLessonVideoUrl(playlistUrl, 'https://youtube.com/watch?v=fake', 2, 'Python Course', 'Variables'),
+      'https://www.youtube.com/playlist?list=PL12345&index=3'
+    );
+
+    const singleVideoUrl = 'https://www.youtube.com/watch?v=_uQrJ0TkZlc';
+    assert.equal(
+      resolveLessonVideoUrl(singleVideoUrl, 'https://youtube.com/watch?v=fake', 0, 'Python Course', 'Intro'),
+      'https://www.youtube.com/watch?v=_uQrJ0TkZlc'
+    );
+
+    const topicOnly = 'Python Mastery Bootcamp';
+    const resolvedSearch = resolveLessonVideoUrl(topicOnly, undefined, 0, 'Python Mastery', 'Lec 1: Data Types');
+    assert.ok(resolvedSearch.startsWith('https://www.youtube.com/results?search_query='));
+  });
+
+  test('sanitizeAndSyncTracker repairs a corrupted custom tracker that had stale Striver DSA modules', () => {
+    const corruptedTracker = {
+      ...PRESET_TRACKERS[0],
+      id: 'tracker-custom-999',
+      title: 'https://www.youtube.com/watch?v=_uQrJ0TkZlc Python Tutorial',
+      sourceUrl: 'https://www.youtube.com/watch?v=_uQrJ0TkZlc',
+    };
+
+    const repaired = sanitizeAndSyncTracker(corruptedTracker);
+    assert.equal(repaired.id, 'tracker-custom-999');
+    assert.equal(calculateCourseProgress(repaired).completed, 0);
+    const firstLesson = repaired.modules[0].lessons[0];
+    assert.ok(!firstLesson.title.includes('Asymptotic Notations'));
+    assert.equal(firstLesson.videoUrl, 'https://www.youtube.com/watch?v=_uQrJ0TkZlc');
+  });
+
+  test('getCourseThemeTokens returns distinct visual theme tokens per course category', () => {
+    const dsaTheme = getCourseThemeTokens('DSA');
+    const aiTheme = getCourseThemeTokens('AI & ML');
+    const webTheme = getCourseThemeTokens('Web Development');
+    assert.notEqual(dsaTheme.accentText, aiTheme.accentText);
+    assert.notEqual(dsaTheme.progressBg, webTheme.progressBg);
+  });
+});
+
 

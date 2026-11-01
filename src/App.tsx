@@ -13,6 +13,9 @@ import {
   resolveDeepWorkToggle,
   calculateCourseProgress,
   completeLessonInTracker,
+  sanitizeAndSyncTracker,
+  getCurrentUncompletedLesson,
+  getCourseThemeTokens,
 } from './utils/studyWorkspaceLogic';
 import { Bell, Play, X, Flame, Volume2, VolumeX, BookOpen, Clock, CheckCircle2 } from 'lucide-react';
 
@@ -20,11 +23,16 @@ export default function App() {
   // Navigation tab state
   const [activeTab, setActiveTab] = useState<'today' | 'curriculum' | 'mentor' | 'squads' | 'schedule'>('today');
 
-  // Trackers state with localStorage persistence
+  // Trackers state with localStorage persistence & automatic stale-curriculum repair
   const [trackers, setTrackers] = useState<Tracker[]>(() => {
     try {
       const saved = localStorage.getItem('devtrack_trackers');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: Tracker[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map(t => sanitizeAndSyncTracker(t));
+        }
+      }
     } catch (e) {
       console.warn('Failed to parse saved trackers:', e);
     }
@@ -115,7 +123,34 @@ export default function App() {
     } catch {}
   }, [streakDays]);
 
-  const activeTracker = trackers.find(t => t.id === activeTrackerId) || trackers[0] || null;
+  const activeTracker = React.useMemo(() => {
+    const found = trackers.find(t => t.id === activeTrackerId) || trackers[0] || null;
+    return found ? sanitizeAndSyncTracker(found) : null;
+  }, [trackers, activeTrackerId]);
+
+  const themeTokens = React.useMemo(
+    () => getCourseThemeTokens(activeTracker?.category),
+    [activeTracker?.category]
+  );
+
+  // Synchronize dependent state whenever active course or course URL changes
+  useEffect(() => {
+    if (!activeTracker) return;
+    const nextUncompleted = getCurrentUncompletedLesson(activeTracker);
+    setSquads(prevSquads =>
+      prevSquads.map(sq => ({
+        ...sq,
+        members: sq.members.map(m =>
+          m.isCurrentUser
+            ? {
+                ...m,
+                currentLesson: nextUncompleted?.title || `${activeTracker.title} (Completed)`,
+              }
+            : m
+        ),
+      }))
+    );
+  }, [activeTracker?.id, activeTracker?.sourceUrl, activeTracker?.title]);
 
   // Compute overall active course progress
   const courseStats = React.useMemo(
@@ -233,10 +268,11 @@ export default function App() {
     );
   };
 
-  // Save new tracker
+  // Save new tracker and immediately set as active course
   const handleSaveTracker = (newTracker: Tracker) => {
-    setTrackers(prev => [newTracker, ...prev]);
-    setActiveTrackerId(newTracker.id);
+    const sanitized = sanitizeAndSyncTracker(newTracker);
+    setTrackers(prev => [sanitized, ...prev.filter(t => t.id !== sanitized.id)]);
+    setActiveTrackerId(sanitized.id);
     setActiveTab('today');
   };
 
@@ -383,7 +419,7 @@ export default function App() {
             {/* Active Study Course Selector */}
             <div className="flex flex-wrap items-center gap-3">
               <label htmlFor="active-course-select" className="font-semibold text-slate-500 flex items-center gap-1.5">
-                <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                <BookOpen className={`w-3.5 h-3.5 ${themeTokens.accentText}`} />
                 <span>Active Course:</span>
               </label>
               <select
@@ -452,6 +488,7 @@ export default function App() {
       <main className="flex-1 pb-16">
         {activeTab === 'today' && (
           <TodaySession
+            key={activeTracker?.id || 'no-tracker'}
             activeTracker={activeTracker}
             streakDays={streakDays}
             onCompleteLesson={handleCompleteLesson}
@@ -466,6 +503,7 @@ export default function App() {
 
         {activeTab === 'curriculum' && activeTracker && (
           <CurriculumRoadmap
+            key={activeTracker.id}
             tracker={activeTracker}
             onToggleLesson={handleToggleLesson}
             onUpdateNotes={handleUpdateNotes}
@@ -474,7 +512,7 @@ export default function App() {
         )}
 
         {activeTab === 'mentor' && activeTracker && (
-          <AIMentorView tracker={activeTracker} streakDays={streakDays} />
+          <AIMentorView key={activeTracker.id} tracker={activeTracker} streakDays={streakDays} />
         )}
 
         {activeTab === 'squads' && (
@@ -491,6 +529,7 @@ export default function App() {
 
         {activeTab === 'schedule' && activeTracker && (
           <ScheduleAlertsView
+            key={activeTracker.id}
             tracker={activeTracker}
             onUpdateSchedule={handleUpdateSchedule}
           />

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { CheckCircle2, Circle, ExternalLink, ChevronDown, ChevronUp, FileText, Clock, Sparkles } from 'lucide-react';
-import { Tracker, Lesson } from '../types';
+import React, { useState, useEffect } from 'react';
+import { CheckCircle2, Circle, ExternalLink, ChevronDown, ChevronUp, FileText, Clock } from 'lucide-react';
+import { Tracker } from '../types';
+import { getCourseThemeTokens, resolveLessonVideoUrl } from '../utils/studyWorkspaceLogic';
 
 interface CurriculumRoadmapProps {
   tracker: Tracker;
@@ -17,12 +18,21 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
 }) => {
   const [filter, setFilter] = useState<'all' | 'remaining' | 'completed'>('all');
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>(() => {
-    // Default all modules to expanded
     const initial: Record<string, boolean> = {};
     tracker.modules.forEach(m => { initial[m.id] = true; });
     return initial;
   });
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
+
+  // Reset expanded modules and editing state whenever the active course changes
+  useEffect(() => {
+    const nextExpanded: Record<string, boolean> = {};
+    tracker.modules.forEach(m => {
+      nextExpanded[m.id] = true;
+    });
+    setExpandedModules(nextExpanded);
+    setEditingNotesId(null);
+  }, [tracker.id, tracker.sourceUrl]);
 
   // Compute statistics
   let totalLessons = 0;
@@ -86,13 +96,13 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-slate-700">Curriculum Progress</span>
-            <span className="font-mono tabular-nums font-bold text-indigo-600">
+            <span className={`font-mono tabular-nums font-bold ${getCourseThemeTokens(tracker.category).accentText}`}>
               {completedLessons} of {totalLessons} Lessons ({progressPercent}%)
             </span>
           </div>
           <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
             <div
-              className="h-full bg-indigo-600 transition-all duration-500 rounded-full"
+              className={`h-full ${getCourseThemeTokens(tracker.category).progressBg} transition-all duration-500 rounded-full`}
               style={{ width: `${progressPercent}%` }}
             />
           </div>
@@ -301,7 +311,17 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
                           ) : (
                             <div className="flex items-center gap-4 pt-1 text-xs">
                               <a
-                                href={lesson.videoUrl}
+                                href={
+                                  tracker.id === 'tracker-dsa-striver' || tracker.id === 'tracker-fullstack-mern'
+                                    ? lesson.videoUrl
+                                    : resolveLessonVideoUrl(
+                                        tracker.sourceUrl,
+                                        lesson.videoUrl,
+                                        modIdx * 3,
+                                        tracker.title,
+                                        lesson.title
+                                      )
+                                }
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"

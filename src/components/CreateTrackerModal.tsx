@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { X, Sparkles, Youtube, Clock, Calendar, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Sparkles, Youtube, Clock, Calendar, Check, AlertCircle, Loader2, BookOpen } from 'lucide-react';
 import { Tracker } from '../types';
 import { PRESET_TRACKERS } from '../utils/mockPresets';
+import { buildDynamicTrackerFromInput } from '../utils/studyWorkspaceLogic';
 
 interface CreateTrackerModalProps {
   isOpen: boolean;
@@ -9,11 +10,35 @@ interface CreateTrackerModalProps {
   onSaveTracker: (newTracker: Tracker) => void;
 }
 
+const POPULAR_COURSE_TEMPLATES = [
+  {
+    label: 'Python Full Course',
+    topic: 'Python Programming & Automation Mastery',
+    url: 'https://www.youtube.com/playlist?list=PLu0W_9lII9agwh1XjRt242xIpHhPT2llg',
+  },
+  {
+    label: "Striver's A2Z DSA",
+    topic: "Striver's A2Z DSA Master Path",
+    url: 'https://youtube.com/playlist?list=PLgUwDviBIf0oF6QL8m22w1hIDC1vJ_BHz',
+  },
+  {
+    label: 'Full Stack Web Dev',
+    topic: 'Full Stack Web Development (MERN Mastery)',
+    url: 'https://youtube.com/playlist?list=PLu71SKxNbfoDqgPchmvIsL4hTnJIrtige',
+  },
+  {
+    label: 'Machine Learning & AI',
+    topic: 'Applied Machine Learning & AI Engineering',
+    url: 'https://www.youtube.com/playlist?list=PLZoTAELRMXVPBTrWtJkn3wWQxZkmTXGwe',
+  },
+];
+
 export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
   isOpen,
   onClose,
   onSaveTracker,
 }) => {
+  const [courseTopic, setCourseTopic] = useState('');
   const [inputUrl, setInputUrl] = useState('');
   const [dailyMinutes, setDailyMinutes] = useState<number>(60);
   const [scheduledTime, setScheduledTime] = useState<string>('20:00');
@@ -32,33 +57,55 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
     );
   };
 
-  const handleSelectPreset = (preset: Tracker) => {
-    setInputUrl(preset.sourceUrl || preset.title);
+  const handleSelectQuickTemplate = (tpl: { label: string; topic: string; url: string }) => {
+    setCourseTopic(tpl.topic);
+    setInputUrl(tpl.url);
+    setErrorMsg(null);
+  };
+
+  const resetAndClose = () => {
+    setCourseTopic('');
+    setInputUrl('');
+    setErrorMsg(null);
+    setIsLoading(false);
+    onClose();
   };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputUrl.trim()) {
-      setErrorMsg('Please enter a YouTube playlist link, video URL, or syllabus topic.');
+    const trimmedUrl = inputUrl.trim();
+    const trimmedTopic = courseTopic.trim();
+
+    if (!trimmedUrl && !trimmedTopic) {
+      setErrorMsg('Please enter a YouTube playlist/video link or a course topic.');
       return;
     }
 
+    const effectiveUrl = trimmedUrl || trimmedTopic;
+    const effectiveTopic = trimmedTopic || trimmedUrl;
+    const uniqueTrackerId = `tracker-${Date.now()}`;
+
     setErrorMsg(null);
     setIsLoading(true);
-    setLoadingStep('Analyzing playlist and topics with Gemini AI...');
+    setLoadingStep('Extracting course syllabus & binding YouTube lectures...');
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6500);
+
       const response = await fetch('/api/extract-resource', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: inputUrl,
-          rawTopic: inputUrl,
+          url: effectiveUrl,
+          rawTopic: effectiveTopic,
           dailyMinutes,
         }),
+        signal: controller.signal,
       });
 
-      setLoadingStep('Structuring day-by-day modules and lessons...');
+      clearTimeout(timeoutId);
+      setLoadingStep('Structuring day-by-day modules, exercises, and YouTube links...');
 
       const result = await response.json();
 
@@ -66,59 +113,34 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
         throw new Error(result.error || 'Failed to extract syllabus');
       }
 
-      const extracted = result.data;
-
-      // Construct a complete Tracker object
-      const newTracker: Tracker = {
-        id: `tracker-${Date.now()}`,
-        title: extracted.title || 'Personalized Study Track',
-        description: extracted.description || 'Structured self-study roadmap powered by DevTrack',
-        category: extracted.category || 'DSA',
-        difficulty: extracted.difficulty || 'Intermediate',
-        instructor: extracted.instructor || 'Curated Instructor',
-        sourceUrl: inputUrl,
-        totalVideos: extracted.totalVideos || 16,
-        estimatedTotalMinutes: extracted.estimatedTotalMinutes || 600,
-        dailyMinutesTarget: dailyMinutes,
-        scheduledTime: scheduledTime,
+      // Build and normalize the new Tracker so all lessons start at 0% and bind to effectiveUrl
+      const newTracker = buildDynamicTrackerFromInput({
+        inputUrl: effectiveUrl,
+        rawTopic: trimmedTopic || result.data.title || effectiveTopic,
+        extractedData: result.data,
+        dailyMinutes,
+        scheduledTime,
         studyDays: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5, 6],
-        createdAt: new Date().toISOString(),
-        modules: (extracted.modules || []).map((mod: any, mIdx: number) => ({
-          id: mod.id || `mod-${mIdx + 1}`,
-          title: mod.title || `Module ${mIdx + 1}`,
-          description: mod.description || '',
-          lessons: (mod.lessons || []).map((les: any, lIdx: number) => ({
-            id: les.id || `les-${mIdx + 1}-${lIdx + 1}`,
-            title: les.title || `Lesson ${lIdx + 1}`,
-            durationMinutes: les.durationMinutes || 40,
-            videoUrl: les.videoUrl || inputUrl,
-            keyConcepts: Array.isArray(les.keyConcepts) ? les.keyConcepts : ['Fundamentals', 'Implementation'],
-            practiceTask: les.practiceTask || 'Practice core exercises on LeetCode / local repo',
-            completed: false,
-          })),
-        })),
-      };
+        trackerId: uniqueTrackerId,
+      });
 
       onSaveTracker(newTracker);
-      onClose();
+      resetAndClose();
     } catch (err: any) {
-      console.warn('Extraction fallback to high quality curated template:', err);
-      // Fallback: If AI fails or user is offline, find matching preset or create a solid template
-      const matchedPreset = PRESET_TRACKERS.find(p =>
-        inputUrl.toLowerCase().includes('dsa') || inputUrl.toLowerCase().includes('striver')
-      ) || PRESET_TRACKERS[0];
+      console.warn('Building dynamic course tracker locally:', err?.message || err);
 
-      const customFallback: Tracker = {
-        ...matchedPreset,
-        id: `tracker-${Date.now()}`,
-        title: inputUrl.length > 50 ? `${inputUrl.slice(0, 47)}...` : inputUrl,
-        dailyMinutesTarget: dailyMinutes,
-        scheduledTime: scheduledTime,
-        studyDays: selectedDays,
-      };
+      // Dynamic curriculum builder: NEVER copies pre-completed Striver DSA lessons for non-DSA courses
+      const dynamicTracker = buildDynamicTrackerFromInput({
+        inputUrl: effectiveUrl,
+        rawTopic: effectiveTopic,
+        dailyMinutes,
+        scheduledTime,
+        studyDays: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5, 6],
+        trackerId: uniqueTrackerId,
+      });
 
-      onSaveTracker(customFallback);
-      onClose();
+      onSaveTracker(dynamicTracker);
+      resetAndClose();
     } finally {
       setIsLoading(false);
     }
@@ -126,7 +148,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-xl w-full p-6 space-y-6 relative max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-xl w-full p-6 space-y-5 relative max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
           <div className="flex items-center gap-2">
@@ -134,11 +156,12 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
               <Sparkles className="w-4 h-4" />
             </div>
             <h2 className="text-lg font-bold text-slate-900">
-              Create Personalized Learning Tracker
+              Add New YouTube Course / Study Track
             </h2>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={resetAndClose}
             className="p-1 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -152,37 +175,58 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleGenerate} className="space-y-5">
-          {/* Resource URL / Topic input */}
+        <form onSubmit={handleGenerate} className="space-y-4">
+          {/* Course Title / Subject Input */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              YouTube Playlist Link, Video URL, or Syllabus Topic
+              Course Name or Subject (e.g., &quot;Python Full Course&quot;, &quot;React 19&quot;, &quot;System Design&quot;)
             </label>
             <div className="relative">
-              <Youtube className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+              <BookOpen className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
               <input
                 type="text"
-                value={inputUrl}
-                onChange={e => setInputUrl(e.target.value)}
-                placeholder="Paste link e.g. https://youtube.com/playlist?list=... or type 'Striver DSA'"
-                className="w-full text-xs pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                value={courseTopic}
+                onChange={e => setCourseTopic(e.target.value)}
+                placeholder="e.g. Python Programming Full Course for Beginners"
+                className="w-full text-xs pl-10 pr-3 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
                 disabled={isLoading}
               />
             </div>
           </div>
 
+          {/* Resource URL input */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+              YouTube Playlist Link or Video URL
+            </label>
+            <div className="relative">
+              <Youtube className="w-4 h-4 text-rose-500 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                value={inputUrl}
+                onChange={e => setInputUrl(e.target.value)}
+                placeholder="Paste YouTube link e.g. https://www.youtube.com/playlist?list=..."
+                className="w-full text-xs pl-10 pr-3 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+                disabled={isLoading}
+              />
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              All lesson video buttons in your new course will dynamically bind to this YouTube URL.
+            </p>
+          </div>
+
           {/* Preset fast picks */}
           <div>
-            <span className="block text-xs text-slate-500 mb-2">Or select a popular college track:</span>
+            <span className="block text-xs text-slate-500 mb-2">Or auto-fill a popular study track:</span>
             <div className="flex flex-wrap gap-2">
-              {PRESET_TRACKERS.map(preset => (
+              {POPULAR_COURSE_TEMPLATES.map(tpl => (
                 <button
-                  key={preset.id}
+                  key={tpl.label}
                   type="button"
-                  onClick={() => handleSelectPreset(preset)}
-                  className="px-2.5 py-1 text-xs border border-slate-200 bg-slate-50 hover:bg-slate-100 rounded-lg text-slate-700 transition-colors cursor-pointer text-left"
+                  onClick={() => handleSelectQuickTemplate(tpl)}
+                  className="px-2.5 py-1 text-xs border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 rounded-lg text-slate-700 transition-colors cursor-pointer text-left"
                 >
-                  {preset.title.split(':')[0]}
+                  {tpl.label}
                 </button>
               ))}
             </div>
@@ -264,7 +308,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
           {isLoading && (
             <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-3 text-xs text-indigo-700">
               <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-              <span>{loadingStep || 'Processing with AI...'}</span>
+              <span>{loadingStep || 'Processing course curriculum...'}</span>
             </div>
           )}
 
@@ -272,7 +316,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
             <button
               type="button"
-              onClick={onClose}
+              onClick={resetAndClose}
               disabled={isLoading}
               className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
             >
