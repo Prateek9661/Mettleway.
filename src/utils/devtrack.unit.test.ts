@@ -453,4 +453,36 @@ describe('Unit Tests: Dynamic Course Creation, Curriculum Reset & YouTube URL Bi
   });
 });
 
+describe('Unit Tests: Repository Documentation (README.md) Verification (TDD)', () => {
+  test('README.md exists and includes badges, overview, live demo link, key features, tech stack, local setup instructions, and screenshots section', () => {
+    const readmePath = path.resolve(process.cwd(), 'README.md');
+    assert.ok(fs.existsSync(readmePath), 'README.md must exist at repository root');
+    const readme = fs.readFileSync(readmePath, 'utf-8');
+
+    // Badges
+    assert.match(readme, /img\.shields\.io\/badge/i, 'README.md should include Shields.io badges');
+    // Overview & Live Demo Link
+    assert.match(readme, /# .*DevTrack/i, 'README.md should contain main DevTrack heading');
+    assert.ok(
+      readme.includes('https://ais-pre-v3bjefokcsx6kgmnh7zzm3-989611340884.asia-southeast1.run.app'),
+      'README.md must include the live demo URL'
+    );
+    // Key Features
+    assert.match(readme, /## .*Key Features/i);
+    assert.match(readme, /Deep Work/i);
+    assert.match(readme, /AI Concept Mentor/i);
+    // Tech Stack (React, Vite, Tailwind CSS, Gemini API)
+    assert.match(readme, /## .*Tech Stack/i);
+    assert.match(readme, /React/i);
+    assert.match(readme, /Vite/i);
+    assert.match(readme, /Tailwind CSS/i);
+    assert.match(readme, /Gemini API/i);
+    // Local Setup Instructions
+    assert.match(readme, /## .*(Local Setup|Getting Started|Installation)/i);
+    assert.match(readme, /npm install/i);
+    // Screenshots Placeholder
+    assert.match(readme, /## .*Screenshots/i);
+  });
+});
+
 
