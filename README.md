@@ -4,7 +4,7 @@
 
 **Turn any YouTube playlist, lecture video, or Computer Science syllabus into an actionable daily study schedule, interactive task checklist, and 1-on-1 AI Concept Mentor.**
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-Online-10B981?style=for-the-badge&logo=vercel&logoColor=white)](https://ais-pre-v3bjefokcsx6kgmnh7zzm3-989611340884.asia-southeast1.run.app)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Online-10B981?style=for-the-badge&logo=vercel&logoColor=white)](https://devtrack.ukprateek9661.workers.dev)
 [![React 19](https://img.shields.io/badge/React-19.0-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-6.2-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
@@ -12,7 +12,7 @@
 [![Gemini API](https://img.shields.io/badge/Google_Gemini_API-@google/genai-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
 [![Tests](https://img.shields.io/badge/Tests-28%2F28_Passing-22C55E?style=for-the-badge&logo=nodejs&logoColor=white)](#testing--tdd-suite)
 
-[🌐 **View Live Demo**](https://ais-pre-v3bjefokcsx6kgmnh7zzm3-989611340884.asia-southeast1.run.app) · [✨ **Key Features**](#-key-features) · [🛠️ **Tech Stack**](#️-tech-stack) · [⚡ **Local Setup**](#-local-setup--installation) · [📸 **Screenshots**](#-screenshots)
+[🌐 **View Live Demo**](https://devtrack.ukprateek9661.workers.dev) · [✨ **Key Features**](#-key-features) · [🛠️ **Tech Stack**](#️-tech-stack) · [⚡ **Local Setup**](#-local-setup--installation) · [📸 **Screenshots**](#-screenshots)
 
 </div>
 
@@ -28,7 +28,7 @@ While platforms like YouTube offer world-class engineering playlists, learners o
 
 ## 🌐 Live Demo
 
-🔗 **Live Application:** [**https://ais-pre-v3bjefokcsx6kgmnh7zzm3-989611340884.asia-southeast1.run.app**](https://ais-pre-v3bjefokcsx6kgmnh7zzm3-989611340884.asia-southeast1.run.app)
+🔗 **Live Application:** [**https://devtrack.ukprateek9661.workers.dev**](https://devtrack.ukprateek9661.workers.dev)
 
 ---
 

@@ -464,8 +464,12 @@ describe('Unit Tests: Repository Documentation (README.md) Verification (TDD)', 
     // Overview & Live Demo Link
     assert.match(readme, /# .*DevTrack/i, 'README.md should contain main DevTrack heading');
     assert.ok(
-      readme.includes('https://ais-pre-v3bjefokcsx6kgmnh7zzm3-989611340884.asia-southeast1.run.app'),
-      'README.md must include the live demo URL'
+      readme.includes('https://devtrack.ukprateek9661.workers.dev'),
+      'README.md must include the permanent production live demo URL'
+    );
+    assert.ok(
+      !readme.includes('https://ais-pre-v3bjefokcsx6kgmnh7zzm3-989611340884.asia-southeast1.run.app'),
+      'README.md must not contain the old preview URL'
     );
     // Key Features
     assert.match(readme, /## .*Key Features/i);
