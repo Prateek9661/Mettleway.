@@ -184,6 +184,9 @@ describe('Integration Tests: Live Server SEO HTML, robots.txt, and sitemap.xml D
     assert.equal(htmlRes.status, 200);
     const htmlText = await htmlRes.text();
     assert.ok(htmlText.includes('DevTrack - Dev Track App'));
+    assert.ok(
+      htmlText.includes('<meta name="google-site-verification" content="0X0iN0C9MXiS0_ZLInyDcriTOEsujydnaBL18vhttGo" />')
+    );
     assert.match(htmlText, /<h1[^>]*>[\s\S]*?DevTrack[\s\S]*?<\/h1>/i);
 
     // 2. Verify /robots.txt HTTP endpoint

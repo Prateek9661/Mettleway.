@@ -212,6 +212,11 @@ describe('Unit Tests: SEO Metadata, Visible H1, robots.txt, and sitemap.xml (TDD
     assert.match(html, /<script\s+type="application\/ld\+json">/i);
     assert.ok(html.includes('"@type": "WebApplication"'));
 
+    // Google Site Verification meta tag
+    assert.ok(
+      html.includes('<meta name="google-site-verification" content="0X0iN0C9MXiS0_ZLInyDcriTOEsujydnaBL18vhttGo" />')
+    );
+
     // Visible H1 heading containing 'DevTrack'
     assert.match(html, /<h1[^>]*>[\s\S]*?DevTrack[\s\S]*?<\/h1>/i);
   });
