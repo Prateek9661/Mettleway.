@@ -63,6 +63,15 @@ export interface DailyLogEntry {
   lessonsCompletedCount: number;
 }
 
+export interface StudyTask {
+  id: string;
+  title: string;
+  category: 'video' | 'practice' | 'revision' | 'notes';
+  estimatedMinutes: number;
+  completed: boolean;
+  linkedLessonId?: string;
+}
+
 export interface AIRecapData {
   summary: string;
   practicalChallenges: Array<{
@@ -77,11 +86,27 @@ export interface AIRecapData {
 
 export interface ConceptTutorAnswer {
   directAnswer: string;
+  realWorldAnalogy?: string;
+  stepByStepBreakdown?: string[];
+  complexitySimple?: {
+    time: string;
+    space: string;
+  };
+  commonMistake?: string;
   detailedExplanation: string;
+  interviewPerspective?: {
+    actualInterviewQuestion: string;
+    whatInterviewerExpects: string;
+    followUpTrap?: string;
+  };
   codeExample?: {
     language: string;
     code: string;
     explanation: string;
+    lineByLine?: Array<{
+      line: string;
+      explanation: string;
+    }>;
   };
   quickCheckQuestion?: {
     question: string;
@@ -90,3 +115,5 @@ export interface ConceptTutorAnswer {
     explanation: string;
   };
 }
+
+

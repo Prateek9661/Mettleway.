@@ -1,23 +1,56 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, RotateCcw, CheckCircle2, ExternalLink, Bell, Sparkles, BookOpen, Clock, Lightbulb, PartyPopper } from 'lucide-react';
-import { Tracker, Lesson } from '../types';
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  CheckCircle2,
+  Circle,
+  ExternalLink,
+  Bell,
+  Sparkles,
+  BookOpen,
+  Clock,
+  Lightbulb,
+  PartyPopper,
+  Plus,
+  Trash2,
+  ListTodo,
+  GraduationCap,
+  Map,
+  Shield,
+} from 'lucide-react';
+import { Tracker, Lesson, StudyTask } from '../types';
 import { soundAlert } from '../utils/audioAlert';
+import {
+  getCurrentUncompletedLesson,
+  calculateCourseProgress,
+  generateDailyStudyChecklist,
+  filterStudyTasks,
+} from '../utils/studyWorkspaceLogic';
 import { ConfettiCelebration } from './ConfettiCelebration';
 
 interface TodaySessionProps {
   activeTracker: Tracker | null;
   streakDays: number;
   onCompleteLesson: (lessonId: string, notes?: string, minutesStudied?: number) => void;
+  onToggleLesson: (lessonId: string) => void;
   onSwitchToMentor: () => void;
+  onSwitchToCurriculum: () => void;
   onOpenCreateModal: () => void;
+  isDeepWork?: boolean;
+  onToggleDeepWork?: () => void;
 }
 
 export const TodaySession: React.FC<TodaySessionProps> = ({
   activeTracker,
   streakDays,
   onCompleteLesson,
+  onToggleLesson,
   onSwitchToMentor,
+  onSwitchToCurriculum,
   onOpenCreateModal,
+  isDeepWork = false,
+  onToggleDeepWork,
 }) => {
   // Timer state
   const defaultMinutes = activeTracker?.dailyMinutesTarget || 60;
@@ -27,6 +60,14 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   const [sessionNotes, setSessionNotes] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Task Tracker state (persisted per tracker in localStorage)
+  const [customTasks, setCustomTasks] = useState<StudyTask[]>([]);
+  const [builtInChecks, setBuiltInChecks] = useState<Record<string, boolean>>({});
+  const [newTaskTitle, setNewTaskTitle] = useState<string>('');
+  const [newTaskCategory, setNewTaskCategory] = useState<StudyTask['category']>('practice');
+  const [newTaskMinutes, setNewTaskMinutes] = useState<number>(20);
+  const [taskFilter, setTaskFilter] = useState<'all' | 'todo' | 'done'>('all');
+
   // Celebration overlay state
   const [isCelebrationOpen, setIsCelebrationOpen] = useState<boolean>(false);
   const [celebrationDetails, setCelebrationDetails] = useState<{ title: string; minutes: number }>({
@@ -34,25 +75,73 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     minutes: defaultMinutes,
   });
 
-  // Sync timer when tracker changes
+  // Sync timer & load tasks when tracker changes
   useEffect(() => {
     if (activeTracker) {
       setSecondsRemaining(activeTracker.dailyMinutesTarget * 60);
       setIsTimerRunning(false);
       setHasStartedSession(false);
+
+      try {
+        const savedTasks = localStorage.getItem(`devtrack_custom_tasks_${activeTracker.id}`);
+        if (savedTasks) {
+          setCustomTasks(JSON.parse(savedTasks));
+        } else {
+          setCustomTasks([
+            {
+              id: `default-task-1-${activeTracker.id}`,
+              title: 'Solve 1 related coding problem without looking at hints',
+              category: 'practice',
+              estimatedMinutes: 25,
+              completed: false,
+            },
+            {
+              id: `default-task-2-${activeTracker.id}`,
+              title: 'Summarize time & space complexity in study notes',
+              category: 'revision',
+              estimatedMinutes: 10,
+              completed: false,
+            },
+          ]);
+        }
+      } catch {
+        setCustomTasks([]);
+      }
+
+      try {
+        const savedBuiltIn = localStorage.getItem(`devtrack_builtin_checks_${activeTracker.id}`);
+        if (savedBuiltIn) {
+          setBuiltInChecks(JSON.parse(savedBuiltIn));
+        } else {
+          setBuiltInChecks({});
+        }
+      } catch {
+        setBuiltInChecks({});
+      }
     }
   }, [activeTracker?.id, activeTracker?.dailyMinutesTarget]);
 
+  // Persist custom tasks
+  useEffect(() => {
+    if (!activeTracker) return;
+    try {
+      localStorage.setItem(`devtrack_custom_tasks_${activeTracker.id}`, JSON.stringify(customTasks));
+    } catch {}
+  }, [customTasks, activeTracker]);
+
+  // Persist built-in checks
+  useEffect(() => {
+    if (!activeTracker) return;
+    try {
+      localStorage.setItem(`devtrack_builtin_checks_${activeTracker.id}`, JSON.stringify(builtInChecks));
+    } catch {}
+  }, [builtInChecks, activeTracker]);
+
   // Find next uncompleted lesson
-  const currentLesson: Lesson | null = React.useMemo(() => {
-    if (!activeTracker) return null;
-    for (const mod of activeTracker.modules) {
-      for (const les of mod.lessons) {
-        if (!les.completed) return les;
-      }
-    }
-    return null;
-  }, [activeTracker]);
+  const currentLesson: Lesson | null = React.useMemo(
+    () => getCurrentUncompletedLesson(activeTracker),
+    [activeTracker]
+  );
 
   // Find previous completed lessons for recap
   const recentlyCompletedLesson: Lesson | null = React.useMemo(() => {
@@ -66,6 +155,81 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     return completedList.length > 0 ? completedList[completedList.length - 1] : null;
   }, [activeTracker]);
 
+  // Overall course progress stats
+  const courseProgress = React.useMemo(
+    () => calculateCourseProgress(activeTracker),
+    [activeTracker]
+  );
+
+  // Combined Daily Study Checklist (Curriculum-linked tasks + Custom learner tasks)
+  const allDailyTasks: StudyTask[] = React.useMemo(
+    () => generateDailyStudyChecklist(currentLesson, builtInChecks, customTasks, sessionNotes),
+    [currentLesson, builtInChecks, customTasks, sessionNotes]
+  );
+
+  const filteredTasks = React.useMemo(
+    () => filterStudyTasks(allDailyTasks, taskFilter),
+    [allDailyTasks, taskFilter]
+  );
+
+  const completedTasksCount = allDailyTasks.filter(t => t.completed).length;
+  const totalTasksCount = allDailyTasks.length;
+  const taskCompletionPercent =
+    totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+
+  // Toggle any task in the checklist
+  const handleToggleStudyTask = (task: StudyTask) => {
+    if (task.linkedLessonId) {
+      onToggleLesson(task.linkedLessonId);
+      setToastMessage('Lesson status updated in your curriculum roadmap.');
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
+    if (task.id.startsWith('practice-') || task.id.startsWith('notes-')) {
+      const nextVal = !builtInChecks[task.id];
+      if (nextVal) soundAlert.playCompletionChime();
+      setBuiltInChecks(prev => ({ ...prev, [task.id]: nextVal }));
+      return;
+    }
+
+    setCustomTasks(prev =>
+      prev.map(t => {
+        if (t.id === task.id) {
+          const next = !t.completed;
+          if (next) soundAlert.playCompletionChime();
+          return { ...t, completed: next };
+        }
+        return t;
+      })
+    );
+  };
+
+  // Add a new custom learner task
+  const handleAddCustomTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newTaskTitle.trim();
+    if (!trimmed) return;
+
+    const newTask: StudyTask = {
+      id: `custom-${Date.now()}`,
+      title: trimmed,
+      category: newTaskCategory,
+      estimatedMinutes: Math.max(5, Math.min(180, Number(newTaskMinutes) || 20)),
+      completed: false,
+    };
+
+    setCustomTasks(prev => [...prev, newTask]);
+    setNewTaskTitle('');
+    setToastMessage('Task added to your daily study checklist.');
+    setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  // Delete a custom learner task
+  const handleDeleteCustomTask = (taskId: string) => {
+    setCustomTasks(prev => prev.filter(t => t.id !== taskId));
+  };
+
   // Interval timer tick
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -76,11 +240,11 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
             setIsTimerRunning(false);
             soundAlert.playSessionAlertChime();
             soundAlert.playCompletionChime();
-            soundAlert.fireNotification("Study Session Completed!", {
+            soundAlert.fireNotification('Study Session Completed!', {
               body: `Great job! You finished your scheduled ${activeTracker?.dailyMinutesTarget} minute session.`,
             });
             setCelebrationDetails({
-              title: currentLesson?.title || "Daily Study Session",
+              title: currentLesson?.title || 'Daily Study Session',
               minutes: activeTracker?.dailyMinutesTarget || 60,
             });
             setIsCelebrationOpen(true);
@@ -122,24 +286,24 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   const progressRatio = Math.min(1, totalDailyMinutesStudied / targetMinutes);
   const progressPercent = Math.min(100, Math.round((totalDailyMinutesStudied / targetMinutes) * 100));
 
-  // Circular progress SVG math: radius = 95, circumference = 2 * PI * 95 = 596.9
-  const circleRadius = 95;
+  // Circular progress SVG math: radius = 88
+  const circleRadius = 88;
   const circleCircumference = 2 * Math.PI * circleRadius;
   const strokeDashoffset = circleCircumference - progressRatio * circleCircumference;
 
   const handleTestAlert = () => {
     soundAlert.playSessionAlertChime();
-    soundAlert.fireNotification("DevTrack Session Alert Test", {
+    soundAlert.fireNotification('DevTrack Session Alert Test', {
       body: `Your scheduled study time for ${activeTracker?.title || 'DSA'} is active!`,
     });
-    setToastMessage("🔔 Alert chime played & notification fired!");
+    setToastMessage('Alert chime played & notification fired.');
     setTimeout(() => setToastMessage(null), 3500);
   };
 
   const handleTriggerCelebrationTest = () => {
     soundAlert.playCompletionChime();
     setCelebrationDetails({
-      title: currentLesson?.title || "Daily Study Session",
+      title: currentLesson?.title || 'Daily Study Session',
       minutes: activeTracker?.dailyMinutesTarget || 60,
     });
     setIsCelebrationOpen(true);
@@ -148,7 +312,9 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   const handleMarkComplete = () => {
     if (!currentLesson) return;
     soundAlert.playCompletionChime();
-    const minutesStudied = Math.round((activeTracker!.dailyMinutesTarget * 60 - secondsRemaining) / 60) || currentLesson.durationMinutes;
+    const minutesStudied =
+      Math.round((activeTracker!.dailyMinutesTarget * 60 - secondsRemaining) / 60) ||
+      currentLesson.durationMinutes;
     const finalMinutes = Math.max(minutesStudied, 15);
     onCompleteLesson(currentLesson.id, sessionNotes, finalMinutes);
     setCelebrationDetails({
@@ -157,8 +323,21 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     });
     setIsCelebrationOpen(true);
     setSessionNotes('');
-    setToastMessage("🎉 Awesome! Lesson marked complete and milestone streak extended!");
+    setToastMessage('Lesson marked complete and daily streak extended!');
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const categoryLabel = (cat: StudyTask['category']) => {
+    switch (cat) {
+      case 'video':
+        return 'Video Lecture';
+      case 'practice':
+        return 'Hands-On Practice';
+      case 'revision':
+        return 'Concept Revision';
+      case 'notes':
+        return 'Study Notes';
+    }
   };
 
   if (!activeTracker) {
@@ -169,7 +348,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
         </div>
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">No Active Study Track</h2>
         <p className="text-slate-600 max-w-md mx-auto mb-6 text-sm">
-          Instead of buying expensive 10k courses, import any YouTube playlist or syllabus to generate a personalized daily tracker.
+          Import any YouTube playlist or course syllabus to generate a structured daily study schedule and task tracker.
         </p>
         <button
           onClick={onOpenCreateModal}
@@ -182,204 +361,282 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg border border-slate-700 text-sm flex items-center gap-2 animate-bounce">
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg border border-slate-700 text-xs font-medium flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Top Session Banner & Schedule Status */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-              <span>{activeTracker.category}</span>
-              <span aria-hidden="true">·</span>
-              <span>By {activeTracker.instructor}</span>
-              <span aria-hidden="true">·</span>
-              <span>{activeTracker.difficulty}</span>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+      {/* Course Overview & Learner Goal Header (Minimalist bar in Deep Work Mode) */}
+      {isDeepWork ? (
+        <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-300">
+              <Shield className="w-4 h-4" />
+              <span>Deep Work Session</span>
+            </span>
+            <span aria-hidden="true" className="text-slate-600">·</span>
+            <h1 className="text-base font-bold tracking-tight text-white">
               {activeTracker.title}
             </h1>
+            <span aria-hidden="true" className="text-slate-600">·</span>
+            <span className="text-xs font-mono tabular-nums text-slate-300">
+              {completedTasksCount}/{totalTasksCount} tasks done
+            </span>
           </div>
-
-          {/* Schedule status and quick test chime & celebration preview */}
-          <div className="flex flex-wrap items-center gap-2.5 bg-slate-50 border border-slate-200 p-2.5 rounded-xl self-start md:self-auto">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              <span>Scheduled: <strong className="font-mono tabular-nums">{activeTracker.scheduledTime}</strong> ({activeTracker.dailyMinutesTarget}m daily)</span>
-            </div>
+          {onToggleDeepWork && (
             <button
-              onClick={handleTestAlert}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors cursor-pointer"
-              title="Test the Web Audio session alert chime"
+              type="button"
+              onClick={onToggleDeepWork}
+              className="px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors cursor-pointer"
             >
-              <Bell className="w-3.5 h-3.5" />
-              <span>Test Chime</span>
+              Restore Full Workspace
             </button>
-            <button
-              onClick={handleTriggerCelebrationTest}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-md transition-colors cursor-pointer"
-              title="Preview milestone celebration & confetti burst"
-            >
-              <PartyPopper className="w-3.5 h-3.5" />
-              <span>Preview Milestone</span>
-            </button>
-          </div>
+          )}
         </div>
-      </div>
-
-      {/* Main Grid: Focus Timer + Today's Lesson */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Focus Session Timer & Circular Progress Bar (5 cols) */}
-        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col items-center text-center">
-          <div className="flex items-center justify-between w-full mb-2">
-            <span className="text-xs uppercase tracking-wider font-semibold text-slate-500">
-              Daily Study Progress
-            </span>
-            <span className="text-xs font-bold font-mono tabular-nums text-indigo-600">
-              {totalDailyMinutesStudied} / {targetMinutes}m ({progressPercent}%)
-            </span>
-          </div>
-
-          {/* Visual Circular Progress Bar Display */}
-          <div className="relative my-4 flex items-center justify-center">
-            {/* SVG Progress Ring */}
-            <svg
-              className="w-56 h-56 transform -rotate-90 drop-shadow-xs"
-              viewBox="0 0 230 230"
-              aria-label={`Daily progress: ${progressPercent}%`}
-            >
-              {/* Background Track */}
-              <circle
-                cx="115"
-                cy="115"
-                r={circleRadius}
-                fill="transparent"
-                stroke="#F1F5F9"
-                strokeWidth="12"
-              />
-              {/* Animated Foreground Progress Circle */}
-              <circle
-                cx="115"
-                cy="115"
-                r={circleRadius}
-                fill="transparent"
-                stroke={progressPercent >= 100 ? "#10B981" : "#4F46E5"}
-                strokeWidth="12"
-                strokeDasharray={circleCircumference}
-                strokeDashoffset={strokeDashoffset}
-                strokeLinecap="round"
-                className="transition-all duration-500 ease-out"
-              />
-            </svg>
-
-            {/* Content inside the circular progress ring */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-3xl font-extrabold tracking-tight font-mono tabular-nums text-slate-900">
-                {formatTime(secondsRemaining)}
-              </span>
-
-              <div className="text-[11px] font-medium text-slate-600 mt-1 flex items-center gap-1">
-                <span className="font-mono tabular-nums font-semibold text-slate-800">
-                  {totalDailyMinutesStudied}m
-                </span>
-                <span className="text-slate-400">/</span>
-                <span className="font-mono tabular-nums text-slate-500">
-                  {targetMinutes}m target
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span className="font-semibold text-indigo-600">{activeTracker.category}</span>
+                <span aria-hidden="true">·</span>
+                <span>Instructor: {activeTracker.instructor}</span>
+                <span aria-hidden="true">·</span>
+                <span>{activeTracker.difficulty} Level</span>
+                <span aria-hidden="true">·</span>
+                <span className="font-mono tabular-nums">
+                  Daily Target: {activeTracker.dailyMinutesTarget} mins
                 </span>
               </div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+                DevTrack: {activeTracker.title}
+              </h1>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Check off your daily study tasks below, watch your scheduled lesson, and clear any concept doubts with your AI Professor Mentor.
+              </p>
+            </div>
 
-              {progressPercent >= 100 ? (
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-1.5 flex items-center gap-1 shadow-xs">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  <span>Goal Achieved!</span>
-                </span>
-              ) : (
-                <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full mt-1.5">
-                  {isTimerRunning ? 'Session active' : `${progressPercent}% complete`}
-                </span>
-              )}
+            {/* Course Completion Bar & Quick Study Actions */}
+            <div className="flex flex-col sm:flex-row lg:flex-col items-stretch sm:items-center lg:items-end justify-between gap-4 shrink-0">
+              <div className="w-full sm:w-64 space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-600">Course Mastery</span>
+                  <span className="font-mono tabular-nums font-bold text-slate-900">
+                    {courseProgress.completed}/{courseProgress.total} lessons ({courseProgress.percent}%)
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-600 rounded-full transition-all duration-500"
+                    style={{ width: `${courseProgress.percent}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onSwitchToCurriculum}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Map className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Full Syllabus</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestAlert}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
+                  title="Test the Web Audio session alert chime"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>Test Chime</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTriggerCelebrationTest}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors cursor-pointer"
+                  title="Preview milestone celebration & confetti burst"
+                >
+                  <PartyPopper className="w-3.5 h-3.5" />
+                  <span>Preview Milestone</span>
+                </button>
+              </div>
             </div>
           </div>
-
-          {/* Timer Controls */}
-          <div className="flex items-center gap-3 mb-6">
-            <button
-              onClick={() => {
-                setIsTimerRunning(!isTimerRunning);
-                setHasStartedSession(true);
-              }}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-sm cursor-pointer ${
-                isTimerRunning
-                  ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-              }`}
-            >
-              {isTimerRunning ? (
-                <>
-                  <Pause className="w-4 h-4 fill-white" />
-                  <span>Pause Timer</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-white" />
-                  <span>{hasStartedSession ? 'Resume Session' : 'Start Study Session'}</span>
-                </>
-              )}
-            </button>
-
-            <button
-              onClick={() => {
-                setIsTimerRunning(false);
-                setSecondsRemaining(activeTracker.dailyMinutesTarget * 60);
-              }}
-              className="p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-              title="Reset timer"
-              aria-label="Reset timer"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Quick preset increments */}
-          <div className="flex items-center gap-2 text-xs text-slate-500 border-t border-slate-100 pt-4 w-full justify-center">
-            <span>Adjust:</span>
-            <button
-              onClick={() => setSecondsRemaining(prev => prev + 300)}
-              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono cursor-pointer"
-            >
-              +5m
-            </button>
-            <button
-              onClick={() => setSecondsRemaining(prev => prev + 900)}
-              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono cursor-pointer"
-            >
-              +15m
-            </button>
-            <button
-              onClick={() => setSecondsRemaining(activeTracker.dailyMinutesTarget * 60)}
-              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono cursor-pointer"
-            >
-              Default ({activeTracker.dailyMinutesTarget}m)
-            </button>
-          </div>
         </div>
+      )}
 
-        {/* Right Column: Today's Assigned Lesson & Notes (7 cols) */}
-        <div className="lg:col-span-7 space-y-6">
+      {/* Main Learner Workspace Grid: Left (Daily Task Tracker + Lesson) | Right (Focus Timer + Recap) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Primary Column: Daily Task Checklist + Today's Assigned Lesson */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* 1. Interactive Daily Study Task Checklist */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ListTodo className="w-4 h-4 text-indigo-600" />
+                  <h2 className="text-base font-bold text-slate-900">
+                    Today's Study Task Checklist
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Break your learning session into clear, actionable steps and check them off as you go.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 self-start sm:self-auto">
+                <span className="text-xs font-mono tabular-nums font-semibold text-slate-700">
+                  {completedTasksCount}/{totalTasksCount} completed ({taskCompletionPercent}%)
+                </span>
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-xs font-medium">
+                  {(['all', 'todo', 'done'] as const).map(f => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setTaskFilter(f)}
+                      className={`px-2.5 py-1 rounded-md capitalize transition-colors cursor-pointer ${
+                        taskFilter === f
+                          ? 'bg-white text-slate-900 shadow-2xs font-semibold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {f === 'todo' ? 'To Do' : f === 'done' ? 'Done' : 'All'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Task List Items */}
+            <div className="divide-y divide-slate-100">
+              {filteredTasks.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-500">
+                  {taskFilter === 'done'
+                    ? 'No completed tasks yet today. Check off your first study task above!'
+                    : 'All tasks in this view are complete! Add a custom study task below.'}
+                </div>
+              ) : (
+                filteredTasks.map(task => {
+                  const isCustom = task.id.startsWith('custom-') || task.id.startsWith('default-task-');
+                  return (
+                    <div
+                      key={task.id}
+                      className="py-3 flex items-start justify-between gap-3 group hover:bg-slate-50/70 -mx-2 px-2 rounded-lg transition-colors"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStudyTask(task)}
+                        className="flex items-start gap-3 text-left flex-1 cursor-pointer"
+                      >
+                        <span className="mt-0.5 text-slate-400 group-hover:text-indigo-600 transition-colors shrink-0">
+                          {task.completed ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          ) : (
+                            <Circle className="w-4 h-4" />
+                          )}
+                        </span>
+                        <div className="space-y-0.5">
+                          <p
+                            className={`text-sm font-medium leading-snug ${
+                              task.completed ? 'line-through text-slate-400' : 'text-slate-800'
+                            }`}
+                          >
+                            {task.title}
+                          </p>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                            <span>{categoryLabel(task.category)}</span>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono tabular-nums">~{task.estimatedMinutes}m</span>
+                            {task.linkedLessonId && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="text-indigo-600 font-medium">Synced with Roadmap</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+
+                      {isCustom && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCustomTask(task.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md opacity-70 group-hover:opacity-100 transition-opacity cursor-pointer"
+                          title="Remove custom task"
+                          aria-label="Remove custom task"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Add Custom Study Task Form */}
+            <form
+              onSubmit={handleAddCustomTask}
+              className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5"
+            >
+              <input
+                type="text"
+                value={newTaskTitle}
+                onChange={e => setNewTaskTitle(e.target.value)}
+                placeholder="Add a personal study task (e.g., Dry-run binary search on paper)..."
+                className="flex-1 text-xs px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+              />
+              <div className="flex items-center gap-2">
+                <select
+                  value={newTaskCategory}
+                  onChange={e => setNewTaskCategory(e.target.value as StudyTask['category'])}
+                  aria-label="Task category"
+                  className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
+                >
+                  <option value="practice">Practice</option>
+                  <option value="video">Video</option>
+                  <option value="revision">Revision</option>
+                  <option value="notes">Notes</option>
+                </select>
+                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-600">
+                  <input
+                    type="number"
+                    min={5}
+                    max={180}
+                    step={5}
+                    value={newTaskMinutes}
+                    onChange={e => setNewTaskMinutes(Number(e.target.value))}
+                    aria-label="Estimated minutes"
+                    className="w-10 font-mono tabular-nums text-slate-900 font-semibold bg-transparent focus:outline-none text-center"
+                  />
+                  <span className="text-slate-400">m</span>
+                </div>
+                <button
+                  type="submit"
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Task</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* 2. Today's Assigned Lesson & Study Notes Card */}
           {currentLesson ? (
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-indigo-600">
-                  Today's Scheduled Lesson
+                  Active Curriculum Lesson
                 </span>
                 <span className="text-xs text-slate-500 font-mono tabular-nums flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" />
-                  {currentLesson.durationMinutes} mins
+                  {currentLesson.durationMinutes} mins lecture
                 </span>
               </div>
 
@@ -387,9 +644,8 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 <h2 className="text-xl font-bold text-slate-900 leading-snug">
                   {currentLesson.title}
                 </h2>
-                {/* Clean unboxed concept metadata */}
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-2">
-                  <span>Concepts:</span>
+                  <span>Core Concepts:</span>
                   {currentLesson.keyConcepts.map((concept, i) => (
                     <React.Fragment key={i}>
                       <span className="text-slate-800 font-medium">{concept}</span>
@@ -399,12 +655,12 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 </div>
               </div>
 
-              {/* Practice Task Box */}
+              {/* Practice Task Callout */}
               {currentLesson.practiceTask && (
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
                   <div className="font-semibold text-slate-800 flex items-center gap-1.5">
                     <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Hands-On Practice Task:</span>
+                    <span>Recommended Hands-On Exercise:</span>
                   </div>
                   <p className="text-slate-600 leading-relaxed pl-5">
                     {currentLesson.practiceTask}
@@ -412,8 +668,8 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 </div>
               )}
 
-              {/* Action Buttons: Watch Video + Mark Completed */}
-              <div className="flex flex-wrap items-center gap-3 pt-2">
+              {/* Action Buttons: Watch Video + Ask Professor Mentor + Mark Completed */}
+              <div className="flex flex-wrap items-center gap-3 pt-1">
                 <a
                   href={currentLesson.videoUrl}
                   target="_blank"
@@ -421,65 +677,199 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                   className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open YouTube Lesson</span>
+                  <span>Watch YouTube Lecture</span>
                 </a>
 
                 <button
+                  type="button"
+                  onClick={onSwitchToMentor}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  <GraduationCap className="w-3.5 h-3.5" />
+                  <span>Ask Professor Mentor</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleMarkComplete}
-                  className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm cursor-pointer ml-auto"
+                  className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-xs cursor-pointer sm:ml-auto"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Mark Completed Today</span>
+                  <span>Complete Lesson & Log Streak</span>
                 </button>
               </div>
 
               {/* Study Notes text area */}
-              <div className="pt-2 border-t border-slate-100">
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  Lesson Notes & Key Takeaways:
+              <div className="pt-3 border-t border-slate-100">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Quick Lesson Notes & Key Formulas (Saved on completion):
                 </label>
                 <textarea
                   value={sessionNotes}
                   onChange={e => setSessionNotes(e.target.value)}
-                  placeholder="Record what clicked today, tricky edge cases, or code syntax to remember..."
+                  placeholder="Jot down what clicked today, dry-run examples, or edge cases to remember..."
                   rows={3}
-                  className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none bg-slate-50/50"
+                  className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none bg-slate-50/60 text-slate-900"
                 />
               </div>
             </div>
           ) : (
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-8 text-center space-y-3">
               <CheckCircle2 className="w-12 h-12 text-emerald-600 mx-auto" />
-              <h3 className="text-lg font-bold text-emerald-900">All Scheduled Lessons Completed!</h3>
+              <h3 className="text-lg font-bold text-emerald-900">All Curriculum Lessons Completed!</h3>
               <p className="text-xs text-emerald-800 max-w-md mx-auto">
-                You have finished every lesson in this track! Review concepts with the AI Mentor or import your next playlist.
+                You have finished every scheduled lesson in this track. Practice interview questions with the Concept Mentor or import your next course!
               </p>
             </div>
           )}
+        </div>
 
-          {/* Yesterday's Recap Card (Concept Continuity) */}
-          {recentlyCompletedLesson && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex items-start gap-4">
-              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl shrink-0 mt-0.5">
-                <Sparkles className="w-4 h-4" />
+        {/* Right Utility Column (4 cols): Focus Timer & Previous Concept Recap */}
+        <div className="lg:col-span-4 space-y-6">
+          {/* Focus Session Timer Card */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col items-center text-center">
+            <div className="flex items-center justify-between w-full mb-2">
+              <span className="text-xs uppercase tracking-wider font-semibold text-slate-500">
+                Focus Study Timer
+              </span>
+              <span className="text-xs font-bold font-mono tabular-nums text-indigo-600">
+                {totalDailyMinutesStudied}/{targetMinutes}m ({progressPercent}%)
+              </span>
+            </div>
+
+            {/* Visual Circular Progress Ring */}
+            <div className="relative my-3 flex items-center justify-center">
+              <svg
+                className="w-48 h-48 transform -rotate-90"
+                viewBox="0 0 210 210"
+                aria-label={`Daily progress: ${progressPercent}%`}
+              >
+                <circle
+                  cx="105"
+                  cy="105"
+                  r={circleRadius}
+                  fill="transparent"
+                  stroke="#F1F5F9"
+                  strokeWidth="10"
+                />
+                <circle
+                  cx="105"
+                  cy="105"
+                  r={circleRadius}
+                  fill="transparent"
+                  stroke={progressPercent >= 100 ? '#10B981' : '#4F46E5'}
+                  strokeWidth="10"
+                  strokeDasharray={circleCircumference}
+                  strokeDashoffset={strokeDashoffset}
+                  strokeLinecap="round"
+                  className="transition-all duration-500 ease-out"
+                />
+              </svg>
+
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-3xl font-extrabold tracking-tight font-mono tabular-nums text-slate-900">
+                  {formatTime(secondsRemaining)}
+                </span>
+                <span className="text-[11px] font-medium text-slate-500 mt-1 font-mono tabular-nums">
+                  {isTimerRunning
+                    ? 'Focus session active'
+                    : progressPercent >= 100
+                    ? 'Daily target achieved'
+                    : `${targetMinutes}m daily goal`}
+                </span>
               </div>
-              <div className="space-y-1 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-800">Previous Lesson Mastered</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-slate-500">{recentlyCompletedLesson.title}</span>
-                </div>
-                <p className="text-slate-600 leading-relaxed">
-                  {recentlyCompletedLesson.notes || "Solid foundation logged. Remember to practice applying these concepts in real LeetCode or project tasks today."}
-                </p>
-                <button
-                  onClick={onSwitchToMentor}
-                  className="text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-1 pt-1 cursor-pointer"
-                >
-                  <span>Review full AI recap & test doubts</span>
-                  <span aria-hidden="true">&rarr;</span>
-                </button>
+            </div>
+
+            {/* Timer Controls */}
+            <div className="flex items-center gap-2.5 mb-5 w-full justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTimerRunning(!isTimerRunning);
+                  setHasStartedSession(true);
+                }}
+                className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-xs cursor-pointer ${
+                  isTimerRunning
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                }`}
+              >
+                {isTimerRunning ? (
+                  <>
+                    <Pause className="w-3.5 h-3.5 fill-white" />
+                    <span>Pause Focus Timer</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5 fill-white" />
+                    <span>{hasStartedSession ? 'Resume Focus Timer' : 'Start Focus Timer'}</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTimerRunning(false);
+                  setSecondsRemaining(activeTracker.dailyMinutesTarget * 60);
+                }}
+                className="p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                title="Reset timer"
+                aria-label="Reset timer"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick preset increments */}
+            <div className="flex items-center gap-2 text-xs text-slate-500 border-t border-slate-100 pt-3.5 w-full justify-center">
+              <span>Adjust:</span>
+              <button
+                type="button"
+                onClick={() => setSecondsRemaining(prev => prev + 300)}
+                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
+              >
+                +5m
+              </button>
+              <button
+                type="button"
+                onClick={() => setSecondsRemaining(prev => prev + 900)}
+                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
+              >
+                +15m
+              </button>
+              <button
+                type="button"
+                onClick={() => setSecondsRemaining(activeTracker.dailyMinutesTarget * 60)}
+                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
+              >
+                {activeTracker.dailyMinutesTarget}m
+              </button>
+            </div>
+          </div>
+
+          {/* Previous Lesson Revision Card (Hidden in Deep Work mode) */}
+          {!isDeepWork && recentlyCompletedLesson && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-2.5">
+              <div className="flex items-center gap-2 text-xs font-semibold text-indigo-600">
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span>Last Completed Lesson</span>
               </div>
+              <h3 className="text-sm font-bold text-slate-900 leading-snug">
+                {recentlyCompletedLesson.title}
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {recentlyCompletedLesson.notes ||
+                  'Completed and logged in your roadmap. Use the Concept Mentor to review real-world analogies or test yourself before moving ahead.'}
+              </p>
+              <button
+                type="button"
+                onClick={onSwitchToMentor}
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-1 pt-1 cursor-pointer"
+              >
+                <span>Revise with Professor Mentor</span>
+                <span aria-hidden="true">&rarr;</span>
+              </button>
             </div>
           )}
         </div>

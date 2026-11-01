@@ -9,7 +9,12 @@ import { CreateTrackerModal } from './components/CreateTrackerModal';
 import { Tracker, StudySquad } from './types';
 import { PRESET_TRACKERS, INITIAL_SQUADS } from './utils/mockPresets';
 import { soundAlert } from './utils/audioAlert';
-import { Bell, Play, X } from 'lucide-react';
+import {
+  resolveDeepWorkToggle,
+  calculateCourseProgress,
+  completeLessonInTracker,
+} from './utils/studyWorkspaceLogic';
+import { Bell, Play, X, Flame, Volume2, VolumeX, BookOpen, Clock, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   // Navigation tab state
@@ -62,9 +67,23 @@ export default function App() {
   // Create Modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
 
+  // Deep Work distraction-free mode state
+  const [isDeepWork, setIsDeepWork] = useState<boolean>(false);
+
   // Active Scheduled Session In-App Alert banner
   const [scheduledAlertBanner, setScheduledAlertBanner] = useState<string | null>(null);
   const [lastAlertFiredDate, setLastAlertFiredDate] = useState<string>('');
+
+  // Toggle Deep Work mode: hides non-essential views (squads, roadmap, schedule) and focuses on active session
+  const handleToggleDeepWork = () => {
+    setIsDeepWork(prev => {
+      const { isDeepWork: nextDeep, nextTab } = resolveDeepWorkToggle(prev, activeTab);
+      if (nextTab !== activeTab) {
+        setActiveTab(nextTab);
+      }
+      return nextDeep;
+    });
+  };
 
   // Persist trackers
   useEffect(() => {
@@ -97,6 +116,12 @@ export default function App() {
   }, [streakDays]);
 
   const activeTracker = trackers.find(t => t.id === activeTrackerId) || trackers[0] || null;
+
+  // Compute overall active course progress
+  const courseStats = React.useMemo(
+    () => calculateCourseProgress(activeTracker),
+    [activeTracker]
+  );
 
   // Toggle Mute
   const handleToggleMute = () => {
@@ -140,26 +165,7 @@ export default function App() {
   // Complete a lesson
   const handleCompleteLesson = (lessonId: string, notes?: string, minutesStudied: number = 45) => {
     setTrackers(prevTrackers =>
-      prevTrackers.map(t => {
-        if (t.id !== activeTrackerId) return t;
-        return {
-          ...t,
-          modules: t.modules.map(mod => ({
-            ...mod,
-            lessons: mod.lessons.map(les => {
-              if (les.id === lessonId) {
-                return {
-                  ...les,
-                  completed: true,
-                  completedAt: new Date().toISOString(),
-                  notes: notes !== undefined && notes.trim() !== '' ? notes : les.notes,
-                };
-              }
-              return les;
-            }),
-          })),
-        };
-      })
+      prevTrackers.map(t => (t.id === activeTrackerId ? completeLessonInTracker(t, lessonId, notes) : t))
     );
 
     // Increment streak
@@ -274,11 +280,10 @@ export default function App() {
     if (existing) {
       setCurrentSquadId(existing.id);
     } else {
-      // Create new dynamic squad with this code
       const newSquad: StudySquad = {
         id: `squad-${Date.now()}`,
         name: `Cohort ${code}`,
-        trackName: activeTracker?.title || "Computer Science Mastery",
+        trackName: activeTracker?.title || 'Computer Science Mastery',
         description: `Custom study cohort joined with code ${code}`,
         inviteCode: code,
         squadGoal: 'Master core concepts and keep daily streak alive',
@@ -307,7 +312,7 @@ export default function App() {
     const newSquad: StudySquad = {
       id: `squad-${Date.now()}`,
       name,
-      trackName: track || activeTracker?.title || "Computer Science",
+      trackName: track || activeTracker?.title || 'Computer Science',
       description: `Active study squad created by you for peer accountability.`,
       inviteCode: `DEV-${Math.floor(1000 + Math.random() * 9000)}`,
       squadGoal: goal || 'Finish all scheduled lessons on time',
@@ -334,16 +339,16 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 font-sans">
       {/* Scheduled Alert Floating Banner if fired */}
       {scheduledAlertBanner && (
-        <div className="bg-indigo-600 text-white px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-medium z-50 shadow-md">
+        <div className="bg-indigo-600 text-white px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-medium z-50">
           <div className="flex items-center gap-2 max-w-4xl mx-auto">
-            <Bell className="w-4 h-4 animate-bounce" />
+            <Bell className="w-4 h-4" />
             <span>{scheduledAlertBanner}</span>
             <button
               onClick={() => {
                 setActiveTab('today');
                 setScheduledAlertBanner(null);
               }}
-              className="ml-3 px-3 py-1 bg-white text-indigo-700 rounded-md font-semibold hover:bg-indigo-50 cursor-pointer flex items-center gap-1"
+              className="ml-3 px-3 py-1 bg-white text-indigo-700 rounded-md font-semibold hover:bg-indigo-50 cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             >
               <Play className="w-3 h-3 fill-indigo-700" />
               <span>Start Now</span>
@@ -358,7 +363,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Top Bar Navigation */}
+      {/* Top Bar Navigation (Strict 3-Zone Contract) */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -367,7 +372,81 @@ export default function App() {
         toggleMute={handleToggleMute}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
         scheduledTime={activeTracker?.scheduledTime || '20:00'}
+        isDeepWork={isDeepWork}
+        onToggleDeepWork={handleToggleDeepWork}
       />
+
+      {/* Learner Study Desk Utility Strip (Hidden in Deep Work mode to minimize distractions) */}
+      {!isDeepWork && (
+        <div className="bg-white border-b border-slate-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-4 text-xs">
+            {/* Active Study Course Selector */}
+            <div className="flex flex-wrap items-center gap-3">
+              <label htmlFor="active-course-select" className="font-semibold text-slate-500 flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Active Course:</span>
+              </label>
+              <select
+                id="active-course-select"
+                value={activeTracker?.id || ''}
+                onChange={e => setActiveTrackerId(e.target.value)}
+                className="bg-slate-50 border border-slate-200 text-slate-900 font-semibold rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
+              >
+                {trackers.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.title} ({t.category})
+                  </option>
+                ))}
+              </select>
+
+              {/* Unboxed Course Progress Metadata */}
+              <div className="hidden sm:flex items-center gap-2 text-slate-500 pl-2">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="font-mono tabular-nums font-semibold text-slate-800">
+                  {courseStats.completed}/{courseStats.total} lessons done ({courseStats.percent}%)
+                </span>
+              </div>
+            </div>
+
+            {/* Right Learner Status: Daily Time, Streak & Sound Toggle */}
+            <div className="flex items-center gap-4 text-slate-600 ml-auto">
+              <button
+                type="button"
+                onClick={() => setActiveTab('schedule')}
+                className="flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                title="Change daily study reminder time"
+              >
+                <Clock className="w-3.5 h-3.5 text-slate-400" />
+                <span className="font-mono tabular-nums">
+                  Study Time: <strong>{activeTracker?.scheduledTime || '20:00'}</strong>
+                </span>
+              </button>
+
+              <span aria-hidden="true" className="text-slate-300">·</span>
+
+              <div
+                className="flex items-center gap-1.5 text-amber-800 font-semibold whitespace-nowrap shrink-0"
+                title={`${streakDays} consecutive study days completed`}
+              >
+                <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                <span className="font-mono tabular-nums">{streakDays} Day Streak</span>
+              </div>
+
+              <span aria-hidden="true" className="text-slate-300">·</span>
+
+              <button
+                type="button"
+                onClick={handleToggleMute}
+                className="flex items-center gap-1 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                title={isMuted ? 'Unmute study chime' : 'Mute study chime'}
+              >
+                {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Sound On'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main View Router */}
       <main className="flex-1 pb-16">
@@ -376,8 +455,12 @@ export default function App() {
             activeTracker={activeTracker}
             streakDays={streakDays}
             onCompleteLesson={handleCompleteLesson}
+            onToggleLesson={handleToggleLesson}
             onSwitchToMentor={() => setActiveTab('mentor')}
+            onSwitchToCurriculum={() => setActiveTab('curriculum')}
             onOpenCreateModal={() => setIsCreateModalOpen(true)}
+            isDeepWork={isDeepWork}
+            onToggleDeepWork={handleToggleDeepWork}
           />
         )}
 
