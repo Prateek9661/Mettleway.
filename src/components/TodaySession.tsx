@@ -696,7 +696,13 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                       : resolveLessonVideoUrl(
                           activeTracker.sourceUrl,
                           currentLesson.videoUrl,
-                          courseProgress.completed,
+                          activeTracker.modules
+                            .flatMap(m => m.lessons)
+                            .findIndex(l => l.id === currentLesson.id) >= 0
+                            ? activeTracker.modules
+                                .flatMap(m => m.lessons)
+                                .findIndex(l => l.id === currentLesson.id)
+                            : 0,
                           activeTracker.title,
                           currentLesson.title
                         )
@@ -749,6 +755,98 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
               <p className="text-xs text-emerald-800 max-w-md mx-auto">
                 You have finished every scheduled lesson in this track. Practice interview questions with the Concept Mentor or import your next course!
               </p>
+            </div>
+          )}
+
+          {/* 3. Sequential Playlist Lectures & Direct Video Navigation */}
+          {!isDeepWork && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Course Playlist Lectures ({activeTracker.title})
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Click any lesson below to open that specific lecture video or timestamp directly on YouTube.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onSwitchToCurriculum}
+                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer self-start sm:self-auto"
+                >
+                  Open Full Syllabus View &rarr;
+                </button>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {activeTracker.modules
+                  .flatMap(m => m.lessons)
+                  .map((lesson, idx) => {
+                    const directHref =
+                      activeTracker.id === 'tracker-dsa-striver' ||
+                      activeTracker.id === 'tracker-fullstack-mern'
+                        ? lesson.videoUrl
+                        : resolveLessonVideoUrl(
+                            activeTracker.sourceUrl,
+                            lesson.videoUrl,
+                            idx,
+                            activeTracker.title,
+                            lesson.title
+                          );
+                    const isCurrent = currentLesson?.id === lesson.id;
+
+                    return (
+                      <div
+                        key={lesson.id}
+                        className={`py-2.5 flex items-center justify-between gap-3 text-xs ${
+                          isCurrent ? 'bg-indigo-50/50 -mx-2 px-2 rounded-lg' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => onToggleLesson(lesson.id)}
+                            className="text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer shrink-0"
+                            title={lesson.completed ? 'Mark uncompleted' : 'Mark completed'}
+                          >
+                            {lesson.completed ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            ) : (
+                              <Circle className="w-4 h-4" />
+                            )}
+                          </button>
+                          <span
+                            className={`truncate font-medium ${
+                              lesson.completed
+                                ? 'line-through text-slate-400'
+                                : isCurrent
+                                ? 'font-bold text-indigo-950'
+                                : 'text-slate-800'
+                            }`}
+                          >
+                            {lesson.title}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="text-slate-400 font-mono tabular-nums hidden sm:inline">
+                            {lesson.durationMinutes}m
+                          </span>
+                          <a
+                            href={directHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 font-semibold transition-colors cursor-pointer"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>Watch Lecture {idx + 1}</span>
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
             </div>
           )}
         </div>

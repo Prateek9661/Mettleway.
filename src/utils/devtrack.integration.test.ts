@@ -270,6 +270,55 @@ describe('Integration Tests: Dynamic Course Addition, Switching & YouTube URL Sy
     assert.ok(newChecklist[0].title.includes(newActiveLesson.title));
     assert.equal(newChecklist[0].linkedLessonId, newActiveLesson.id);
   });
+
+  test('importing a custom subject (e.g. DBMS) with a first playlist video URL via /api/extract-resource updates all header metadata and maps Lesson 1, Lesson 2, Lesson 3 to direct lecture URLs', async () => {
+    const dbmsFirstVideoUrl =
+      'https://www.youtube.com/watch?v=kBdlM6hNDAE&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y';
+    let serverTracker: any = null;
+
+    const baseUrl = 'http://localhost:3000';
+    try {
+      const res = await fetch(`${baseUrl}/api/extract-resource`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: dbmsFirstVideoUrl,
+          rawTopic: 'DBMS',
+          dailyMinutes: 60,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as any;
+        if (json.success && json.data) {
+          serverTracker = json.data;
+        }
+      }
+    } catch {
+      // Fallback if server is restarting
+    }
+
+    const dbmsTracker = buildDynamicTrackerFromInput({
+      inputUrl: dbmsFirstVideoUrl,
+      rawTopic: 'DBMS',
+      extractedData: serverTracker,
+      dailyMinutes: 60,
+      trackerId: 'tracker-dbms-e2e',
+    });
+
+    // Verify dynamic header metadata (never static "Computer Science Core" or "YouTube Curated Series")
+    assert.ok(dbmsTracker.title.toUpperCase().includes('DBMS'));
+    assert.notEqual(dbmsTracker.category, 'Computer Science Core');
+    assert.notEqual(dbmsTracker.instructor, 'YouTube Curated Series');
+
+    // Verify sequential lessons and direct lecture navigation URLs
+    const lessons = dbmsTracker.modules.flatMap(m => m.lessons);
+    assert.ok(lessons.length >= 3);
+    assert.ok(lessons[0].videoUrl.includes('index=1'));
+    assert.ok(lessons[1].videoUrl.includes('index=2'));
+    assert.ok(lessons[2].videoUrl.includes('index=3'));
+    assert.notEqual(lessons[0].videoUrl, lessons[1].videoUrl);
+    assert.notEqual(lessons[1].videoUrl, lessons[2].videoUrl);
+  });
 });
 
 

@@ -34,14 +34,16 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
     setEditingNotesId(null);
   }, [tracker.id, tracker.sourceUrl]);
 
-  // Compute statistics
+  // Compute statistics and global 0-based lesson index map for direct lecture navigation
   let totalLessons = 0;
   let completedLessons = 0;
   let totalMinutes = 0;
   let completedMinutes = 0;
+  const lessonIndexMap: Record<string, number> = {};
 
   tracker.modules.forEach(m => {
     m.lessons.forEach(l => {
+      lessonIndexMap[l.id] = totalLessons;
       totalLessons += 1;
       totalMinutes += l.durationMinutes;
       if (l.completed) {
@@ -69,8 +71,10 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-              <span>{tracker.category}</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mb-1">
+              <span className={`font-semibold ${getCourseThemeTokens(tracker.category).accentText}`}>
+                {tracker.category}
+              </span>
               <span aria-hidden="true">·</span>
               <span>{tracker.difficulty}</span>
               <span aria-hidden="true">·</span>
@@ -84,12 +88,25 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
             </p>
           </div>
 
-          <button
-            onClick={onOpenCreateModal}
-            className="self-start md:self-auto px-3.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-          >
-            Change / Import Track
-          </button>
+          <div className="flex items-center gap-2 self-start md:self-auto">
+            {tracker.sourceUrl && /^https?:\/\//i.test(tracker.sourceUrl) && (
+              <a
+                href={tracker.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open Playlist</span>
+              </a>
+            )}
+            <button
+              onClick={onOpenCreateModal}
+              className="px-3.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            >
+              Change / Import Track
+            </button>
+          </div>
         </div>
 
         {/* Progress bar */}
@@ -317,17 +334,17 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
                                     : resolveLessonVideoUrl(
                                         tracker.sourceUrl,
                                         lesson.videoUrl,
-                                        modIdx * 3,
+                                        lessonIndexMap[lesson.id] ?? 0,
                                         tracker.title,
                                         lesson.title
                                       )
                                 }
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
+                                className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
-                                <span>Watch Video</span>
+                                <span>Watch Lecture {(lessonIndexMap[lesson.id] ?? 0) + 1}</span>
                               </a>
 
                               <button

@@ -335,6 +335,122 @@ describe('Unit Tests: Dynamic Course Creation, Curriculum Reset & YouTube URL Bi
     assert.notEqual(dsaTheme.accentText, aiTheme.accentText);
     assert.notEqual(dsaTheme.progressBg, webTheme.progressBg);
   });
+
+  test('adding a DBMS course with a YouTube playlist or first-video link dynamically updates header title, category tag, and instructor without static "Computer Science Core / YouTube Curated Series" fallback', () => {
+    const firstVideoOfPlaylistUrl =
+      'https://www.youtube.com/watch?v=kBdlM6hNDAE&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y';
+    const dbmsTracker = buildDynamicTrackerFromInput({
+      inputUrl: firstVideoOfPlaylistUrl,
+      rawTopic: 'DBMS',
+      dailyMinutes: 60,
+      scheduledTime: '20:00',
+      studyDays: [1, 2, 3, 4, 5, 6],
+      trackerId: 'tracker-dbms-test',
+    });
+
+    // 1. Dynamic Header & Subtitle Metadata assertions
+    assert.ok(
+      dbmsTracker.title.toUpperCase().includes('DBMS'),
+      `Expected tracker title to reflect DBMS, got "${dbmsTracker.title}"`
+    );
+    assert.ok(
+      !dbmsTracker.title.includes('Computer Science & Software Engineering Track'),
+      'Must not use static Computer Science fallback title'
+    );
+    assert.notEqual(
+      dbmsTracker.category,
+      'Computer Science Core',
+      'Category tag must dynamically reflect DBMS instead of static Computer Science Core'
+    );
+    assert.ok(
+      dbmsTracker.category.toUpperCase().includes('DBMS') || dbmsTracker.category.toUpperCase().includes('DATABASE'),
+      `Expected category to reflect DBMS, got "${dbmsTracker.category}"`
+    );
+    assert.notEqual(
+      dbmsTracker.instructor,
+      'YouTube Curated Series',
+      'Instructor must not show static "YouTube Curated Series" fallback'
+    );
+
+    // 2. Sequential lessons (Lesson 1, Lesson 2, Lesson 3, ...)
+    const allLessons = dbmsTracker.modules.flatMap(m => m.lessons);
+    assert.ok(allLessons.length >= 5, 'Should generate sequential lessons for the DBMS series');
+    assert.ok(allLessons[0].title.startsWith('Lesson 1:'), `Expected Lesson 1, got ${allLessons[0].title}`);
+    assert.ok(allLessons[1].title.startsWith('Lesson 2:'), `Expected Lesson 2, got ${allLessons[1].title}`);
+    assert.ok(allLessons[2].title.startsWith('Lesson 3:'), `Expected Lesson 3, got ${allLessons[2].title}`);
+
+    // 3. Direct Lecture Navigation: each lesson maps to its specific index/video in the playlist
+    assert.ok(
+      allLessons[0].videoUrl.includes('list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y') &&
+        allLessons[0].videoUrl.includes('index=1'),
+      `Lesson 1 URL (${allLessons[0].videoUrl}) must map to index=1 of the playlist`
+    );
+    assert.ok(
+      allLessons[1].videoUrl.includes('list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y') &&
+        allLessons[1].videoUrl.includes('index=2'),
+      `Lesson 2 URL (${allLessons[1].videoUrl}) must map to index=2 of the playlist`
+    );
+    assert.ok(
+      allLessons[2].videoUrl.includes('list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y') &&
+        allLessons[2].videoUrl.includes('index=3'),
+      `Lesson 3 URL (${allLessons[2].videoUrl}) must map to index=3 of the playlist`
+    );
+  });
+
+  test('direct lecture navigation for single YouTube video URL maps Lesson 2 and Lesson 3 to distinct lecture timestamps', () => {
+    const singleVideoUrl = 'https://www.youtube.com/watch?v=hlGoQC332VM';
+    const tracker = buildDynamicTrackerFromInput({
+      inputUrl: singleVideoUrl,
+      rawTopic: 'SQL & DBMS Crash Course',
+      trackerId: 'tracker-sql-single',
+    });
+
+    const allLessons = tracker.modules.flatMap(m => m.lessons);
+    assert.equal(allLessons[0].videoUrl, 'https://www.youtube.com/watch?v=hlGoQC332VM');
+    assert.ok(
+      allLessons[1].videoUrl.includes('v=hlGoQC332VM') && allLessons[1].videoUrl.includes('t='),
+      `Lesson 2 (${allLessons[1].videoUrl}) on a single-video course must include a direct timestamp parameter`
+    );
+    assert.ok(
+      allLessons[2].videoUrl.includes('v=hlGoQC332VM') &&
+        allLessons[2].videoUrl !== allLessons[1].videoUrl,
+      `Lesson 3 (${allLessons[2].videoUrl}) must have a distinct timestamp from Lesson 2`
+    );
+  });
+
+  test('buildDynamicTrackerFromInput maps scraped playlistVideos into sequential lessons with exact videoId watch URLs', () => {
+    const playlistUrl = 'https://www.youtube.com/playlist?list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y';
+    const tracker = buildDynamicTrackerFromInput({
+      inputUrl: playlistUrl,
+      rawTopic: 'DBMS',
+      extractedData: {
+        title: 'DBMS Complete Playlist by Gate Smashers',
+        instructor: 'Gate Smashers',
+        playlistVideos: [
+          { videoId: 'kBdlM6hNDAE', title: 'Introduction to DBMS', durationMinutes: 22 },
+          { videoId: '3EJlovevfcA', title: '3-Tier Architecture in DBMS', durationMinutes: 18 },
+          { videoId: 'pDX4NR4eY3A', title: 'ER Diagram & Relational Model', durationMinutes: 28 },
+        ],
+      },
+      trackerId: 'tracker-dbms-scraped',
+    });
+
+    assert.equal(tracker.instructor, 'Gate Smashers');
+    const lessons = tracker.modules.flatMap(m => m.lessons);
+    assert.equal(lessons.length, 3);
+    assert.equal(
+      lessons[0].videoUrl,
+      'https://www.youtube.com/watch?v=kBdlM6hNDAE&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=1'
+    );
+    assert.equal(
+      lessons[1].videoUrl,
+      'https://www.youtube.com/watch?v=3EJlovevfcA&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=2'
+    );
+    assert.equal(
+      lessons[2].videoUrl,
+      'https://www.youtube.com/watch?v=pDX4NR4eY3A&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=3'
+    );
+  });
 });
 
 

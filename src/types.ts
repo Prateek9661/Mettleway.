@@ -21,8 +21,18 @@ export interface Tracker {
   id: string;
   title: string;
   description: string;
-  category: 'DSA' | 'Web Development' | 'System Design' | 'Computer Science Core' | 'AI & ML';
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+  category:
+    | 'DSA'
+    | 'Web Development'
+    | 'System Design'
+    | 'Computer Science Core'
+    | 'AI & ML'
+    | 'DBMS & SQL'
+    | 'Operating Systems'
+    | 'Computer Networks'
+    | 'Object-Oriented Programming'
+    | string;
+  difficulty: 'Beginner' | 'Intermediate' | 'Advanced' | string;
   instructor: string;
   sourceUrl: string;
   totalVideos: number;

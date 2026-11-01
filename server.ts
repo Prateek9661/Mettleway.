@@ -5,7 +5,11 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { buildSmartConceptFallback } from './src/utils/aiMentorCache';
-import { buildDynamicTrackerFromInput } from './src/utils/studyWorkspaceLogic';
+import {
+  buildDynamicTrackerFromInput,
+  parseYouTubeSourceUrl,
+  ScrapedPlaylistVideoItem,
+} from './src/utils/studyWorkspaceLogic';
 
 dotenv.config();
 
@@ -57,46 +61,155 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallbackMessage: string
   });
 }
 
-// Endpoint: Extract & Generate Personalized Curriculum from URL or Syllabus
-app.post('/api/extract-resource', async (req, res) => {
-  const { url = '', rawTopic = '', dailyMinutes = 60 } = req.body || {};
-  let resolvedTitle = rawTopic && !/^https?:\/\//i.test(rawTopic.trim()) ? rawTopic.trim() : '';
-  let resolvedInstructor = '';
+/**
+ * Scrapes YouTube playlist or watch page metadata & video list (ytInitialData + oEmbed)
+ * when a user provides a playlist URL or the first video link of a playlist.
+ */
+async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
+  title: string;
+  instructor: string;
+  playlistVideos: ScrapedPlaylistVideoItem[];
+}> {
+  const parsed = parseYouTubeSourceUrl(rawUrl);
+  let title = '';
+  let instructor = '';
+  const playlistVideos: ScrapedPlaylistVideoItem[] = [];
 
-  // Attempt fast YouTube oEmbed lookup if a YouTube URL is provided so raw links get their real video/playlist title
-  if (/youtube\.com|youtu\.be/i.test(url)) {
+  if (!parsed.isYouTube) {
+    return { title, instructor, playlistVideos };
+  }
+
+  // 1. Try oEmbed first for fast title & author_name
+  try {
+    const targetForOembed = parsed.videoId
+      ? `https://www.youtube.com/watch?v=${parsed.videoId}`
+      : rawUrl.trim();
+    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(targetForOembed)}&format=json`;
+    const oembedRes = await withTimeout(fetch(oembedUrl), 2000, 'oEmbed timeout');
+    if (oembedRes.ok) {
+      const oembedJson = (await oembedRes.json()) as any;
+      if (oembedJson?.title) title = String(oembedJson.title).trim();
+      if (oembedJson?.author_name) instructor = String(oembedJson.author_name).trim();
+    }
+  } catch {
+    // Ignore oEmbed failure
+  }
+
+  // 2. If playlistId is present, fetch the playlist page to extract sequential playlist videos
+  if (parsed.playlistId) {
     try {
-      const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url.trim())}&format=json`;
-      const oembedRes = await withTimeout(fetch(oembedUrl), 2500, 'oEmbed timeout');
-      if (oembedRes.ok) {
-        const oembedJson = (await oembedRes.json()) as any;
-        if (oembedJson?.title && !resolvedTitle) {
-          resolvedTitle = String(oembedJson.title).trim();
-        }
-        if (oembedJson?.author_name) {
-          resolvedInstructor = String(oembedJson.author_name).trim();
+      const playlistPageUrl = `https://www.youtube.com/playlist?list=${encodeURIComponent(parsed.playlistId)}`;
+      const pageRes = await withTimeout(
+        fetch(playlistPageUrl, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+        }),
+        2800,
+        'Playlist scrape timeout'
+      );
+
+      if (pageRes.ok) {
+        const html = await pageRes.text();
+        const match = html.match(/var\s+ytInitialData\s*=\s*(\{[\s\S]*?\});\s*<\/script>/);
+        if (match?.[1]) {
+          const ytData = JSON.parse(match[1]);
+          const playlistTitle =
+            ytData?.metadata?.playlistMetadataRenderer?.title ||
+            ytData?.header?.playlistHeaderRenderer?.title?.simpleText;
+          if (playlistTitle && typeof playlistTitle === 'string') {
+            title = playlistTitle.trim();
+          }
+
+          const ownerRuns =
+            ytData?.header?.playlistHeaderRenderer?.ownerText?.runs ||
+            ytData?.sidebar?.playlistSidebarRenderer?.items?.[1]?.playlistSidebarSecondaryInfoRenderer
+              ?.videoOwner?.videoOwnerRenderer?.title?.runs;
+          if (Array.isArray(ownerRuns) && ownerRuns[0]?.text && !instructor) {
+            instructor = String(ownerRuns[0].text).trim();
+          }
+
+          // Walk ytData recursively to collect up to 12 playlistVideoRenderer items
+          const collectVideos = (node: any) => {
+            if (!node || typeof node !== 'object' || playlistVideos.length >= 12) return;
+            if (node.playlistVideoRenderer) {
+              const r = node.playlistVideoRenderer;
+              const vid = r.videoId;
+              const vidTitle =
+                r.title?.runs?.[0]?.text || r.title?.simpleText || '';
+              const lengthSec = parseInt(r.lengthSeconds || '0', 10);
+              const durationMinutes =
+                lengthSec > 0 ? Math.max(10, Math.round(lengthSec / 60)) : 35;
+              if (vid && vidTitle) {
+                playlistVideos.push({
+                  videoId: String(vid),
+                  title: String(vidTitle).trim(),
+                  durationMinutes,
+                });
+              }
+              return;
+            }
+            if (Array.isArray(node)) {
+              for (const item of node) collectVideos(item);
+            } else {
+              for (const k of Object.keys(node)) collectVideos(node[k]);
+            }
+          };
+
+          collectVideos(ytData?.contents);
         }
       }
     } catch {
-      // Proceed with topic/URL inference if oEmbed is unavailable
+      // Proceed with fallback / curated sequential lessons if playlist scrape is blocked
     }
+  }
+
+  return { title, instructor, playlistVideos };
+}
+
+// Endpoint: Extract & Generate Personalized Curriculum from URL or Syllabus
+app.post('/api/extract-resource', async (req, res) => {
+  const { url = '', rawTopic = '', dailyMinutes = 60 } = req.body || {};
+  const userSubject = rawTopic && !/^https?:\/\//i.test(rawTopic.trim()) ? rawTopic.trim() : '';
+
+  // Scrape YouTube metadata and playlist video items if a YouTube link was provided
+  const scraped = await scrapeYouTubePlaylistOrVideo(url);
+  const resolvedTitle = userSubject || scraped.title || '';
+  const resolvedInstructor = scraped.instructor || '';
+
+  // If we scraped actual playlist videos directly from YouTube, build the tracker immediately!
+  if (scraped.playlistVideos.length >= 2) {
+    const dynamicTracker = buildDynamicTrackerFromInput({
+      inputUrl: url || rawTopic,
+      rawTopic: userSubject,
+      extractedData: {
+        title: scraped.title || userSubject,
+        instructor: resolvedInstructor,
+        playlistVideos: scraped.playlistVideos,
+      },
+      dailyMinutes,
+    });
+    return res.json({ success: true, data: dynamicTracker, scrapedPlaylist: true });
   }
 
   try {
     const prompt = `You are a world-class Computer Science and Software Engineering curriculum architect.
 A student wants to learn the following subject or playlist resource:
 Resource URL: "${url}"
-Topic / Course Title: "${resolvedTitle || rawTopic || url}"
+Subject / Course Title: "${resolvedTitle || rawTopic || url}"
 ${resolvedInstructor ? `Instructor / Channel: "${resolvedInstructor}"` : ''}
 Target daily study time: ${dailyMinutes} minutes.
 
-Generate a complete, structured learning path broken down into ordered modules and bite-sized video lessons (aim for 6 to 9 total lessons grouped into 3 logical modules) specifically tailored to "${resolvedTitle || rawTopic || url}".
+Generate a complete, structured learning path broken down into ordered modules and sequential video lessons ("Lesson 1: ...", "Lesson 2: ...", "Lesson 3: ...", etc., aim for 6 to 8 total lessons grouped into 2 or 3 logical modules) specifically tailored to "${resolvedTitle || rawTopic || url}".
+Do NOT use generic titles like "Computer Science Course" or "YouTube Curated Series"—reflect the exact subject "${resolvedTitle || rawTopic || url}".
 Respond strictly in valid JSON matching this schema:
 {
   "title": string,
   "description": string,
-  "category": "DSA" | "Web Development" | "System Design" | "Computer Science Core" | "AI & ML",
-  "difficulty": "Beginner" | "Intermediate" | "Advanced",
+  "category": string,
+  "difficulty": string,
   "instructor": string,
   "totalVideos": number,
   "estimatedTotalMinutes": number,
@@ -127,21 +240,21 @@ Respond strictly in valid JSON matching this schema:
           responseMimeType: 'application/json',
         },
       }),
-      5000,
+      4500,
       'Curriculum extraction timed out'
     );
 
     const parsed = JSON.parse(response.text || '{}');
-    if (resolvedTitle && (!parsed.title || /^https?:\/\//i.test(parsed.title))) {
-      parsed.title = resolvedTitle;
+    if (scraped.title && (!parsed.title || /^https?:\/\//i.test(parsed.title))) {
+      parsed.title = scraped.title;
     }
-    if (resolvedInstructor && !parsed.instructor) {
+    if (resolvedInstructor && (!parsed.instructor || parsed.instructor === 'YouTube Curated Series')) {
       parsed.instructor = resolvedInstructor;
     }
 
     const dynamicTracker = buildDynamicTrackerFromInput({
       inputUrl: url || rawTopic,
-      rawTopic: resolvedTitle || rawTopic,
+      rawTopic: userSubject,
       extractedData: parsed,
       dailyMinutes,
     });
@@ -151,8 +264,11 @@ Respond strictly in valid JSON matching this schema:
     console.warn('Using dynamic topic curriculum builder:', error?.message || error);
     const dynamicTracker = buildDynamicTrackerFromInput({
       inputUrl: url || rawTopic,
-      rawTopic: resolvedTitle || rawTopic,
-      extractedData: resolvedInstructor ? { title: resolvedTitle, instructor: resolvedInstructor } : undefined,
+      rawTopic: userSubject,
+      extractedData:
+        scraped.title || resolvedInstructor
+          ? { title: scraped.title, instructor: resolvedInstructor }
+          : undefined,
       dailyMinutes,
     });
     return res.json({

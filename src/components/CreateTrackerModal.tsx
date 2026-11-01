@@ -12,6 +12,11 @@ interface CreateTrackerModalProps {
 
 const POPULAR_COURSE_TEMPLATES = [
   {
+    label: 'DBMS Complete Playlist',
+    topic: 'DBMS (Database Management Systems)',
+    url: 'https://www.youtube.com/watch?v=kBdlM6hNDAE&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y',
+  },
+  {
     label: 'Python Full Course',
     topic: 'Python Programming & Automation Mastery',
     url: 'https://www.youtube.com/playlist?list=PLu0W_9lII9agwh1XjRt242xIpHhPT2llg',
@@ -98,7 +103,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: effectiveUrl,
-          rawTopic: effectiveTopic,
+          rawTopic: trimmedTopic,
           dailyMinutes,
         }),
         signal: controller.signal,
@@ -113,10 +118,10 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
         throw new Error(result.error || 'Failed to extract syllabus');
       }
 
-      // Build and normalize the new Tracker so all lessons start at 0% and bind to effectiveUrl
+      // Build and normalize the new Tracker so all headers, tags, and lessons reflect the selected subject and YouTube playlist
       const newTracker = buildDynamicTrackerFromInput({
         inputUrl: effectiveUrl,
-        rawTopic: trimmedTopic || result.data.title || effectiveTopic,
+        rawTopic: trimmedTopic,
         extractedData: result.data,
         dailyMinutes,
         scheduledTime,
