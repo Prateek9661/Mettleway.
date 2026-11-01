@@ -12,6 +12,17 @@ import {
   resolveLessonVideoUrl,
   sanitizeAndSyncTracker,
   getCourseThemeTokens,
+  buildDefaultRecapForTracker,
+  LEARNER_ROLE_OPTIONS,
+  PACING_PRESETS,
+  createDefaultLearnerProfile,
+  applyPacingPresetToProfile,
+  applyProfilePacingToTracker,
+  computeSkillMilestones,
+  analyzeSingleCourseStatus,
+  computeProfileCourseAnalytics,
+  markEntireCourseCompleted,
+  resetCourseToPending,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -451,6 +462,114 @@ describe('Unit Tests: Dynamic Course Creation, Curriculum Reset & YouTube URL Bi
       'https://www.youtube.com/watch?v=pDX4NR4eY3A&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=3'
     );
   });
+
+  test('adding a watch?v=FIRST_VID&list=PLAYLIST_ID URL never repeats v=FIRST_VID on Lesson 2, Lesson 3, or subsequent lessons', () => {
+    const firstVideoWithPlaylist =
+      'https://www.youtube.com/watch?v=kBdlM6hNDAE&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y';
+    const tracker = buildDynamicTrackerFromInput({
+      inputUrl: firstVideoWithPlaylist,
+      rawTopic: '', // Even when user leaves topic blank, auto-detect from URL!
+      trackerId: 'tracker-no-repeat-test',
+    });
+
+    // Auto-detected DBMS title and instructor from URL alone
+    assert.ok(
+      tracker.title.toUpperCase().includes('DBMS'),
+      `Expected auto-detected DBMS title from URL alone, got "${tracker.title}"`
+    );
+
+    const lessons = tracker.modules.flatMap(m => m.lessons);
+    assert.ok(lessons.length >= 6);
+
+    // Lesson 1 can use kBdlM6hNDAE, but Lesson 2, Lesson 3, etc. must NEVER repeat v=kBdlM6hNDAE
+    for (let i = 1; i < lessons.length; i++) {
+      assert.ok(
+        !lessons[i].videoUrl.includes('v=kBdlM6hNDAE'),
+        `Lesson ${i + 1} (${lessons[i].videoUrl}) must NOT repeat Lesson 1's videoId v=kBdlM6hNDAE`
+      );
+      assert.notEqual(
+        lessons[i].videoUrl,
+        lessons[0].videoUrl,
+        `Lesson ${i + 1} URL must be distinct from Lesson 1 URL`
+      );
+    }
+
+    // Every single lesson URL across the entire course must be unique
+    const uniqueUrls = new Set(lessons.map(l => l.videoUrl));
+    assert.equal(
+      uniqueUrls.size,
+      lessons.length,
+      'Every lesson in the tracker must have its own unique YouTube URL'
+    );
+  });
+
+  test('sanitizeAndSyncTracker detects and repairs a cached tracker where Lesson 1 and Lesson 2 repeat the same v= videoId', () => {
+    const brokenRepeatedTracker = {
+      ...PRESET_TRACKERS[0],
+      id: 'tracker-broken-repeat',
+      title: 'Operating Systems Full Course',
+      category: 'Operating Systems',
+      instructor: 'Gate Smashers',
+      sourceUrl: 'https://www.youtube.com/watch?v=bkSWJJZNgf8&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p',
+      modules: [
+        {
+          id: 'mod-1',
+          title: 'Module 1: OS Basics',
+          description: 'OS module',
+          lessons: [
+            {
+              id: 'l-1',
+              title: 'Lesson 1: Intro to OS',
+              durationMinutes: 30,
+              videoUrl: 'https://www.youtube.com/watch?v=bkSWJJZNgf8&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p&index=1',
+              keyConcepts: ['Kernel'],
+              practiceTask: 'Task 1',
+              completed: false,
+            },
+            {
+              id: 'l-2',
+              title: 'Lesson 2: Process States',
+              durationMinutes: 35,
+              // BUG SIMULATION: Lesson 2 has the exact same v=bkSWJJZNgf8 as Lesson 1!
+              videoUrl: 'https://www.youtube.com/watch?v=bkSWJJZNgf8&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p&index=2',
+              keyConcepts: ['PCB'],
+              practiceTask: 'Task 2',
+              completed: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const repaired = sanitizeAndSyncTracker(brokenRepeatedTracker);
+    const repairedLessons = repaired.modules.flatMap(m => m.lessons);
+    assert.ok(
+      !repairedLessons[1].videoUrl.includes('v=bkSWJJZNgf8'),
+      `Repaired Lesson 2 URL (${repairedLessons[1].videoUrl}) must not repeat Lesson 1's v=bkSWJJZNgf8`
+    );
+  });
+
+  test('buildDefaultRecapForTracker generates course-specific recap and challenges instead of hardcoded DSA Big-O / Two Pointers', () => {
+    const dbmsTracker = buildDynamicTrackerFromInput({
+      inputUrl: 'https://www.youtube.com/playlist?list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y',
+      rawTopic: 'DBMS',
+      trackerId: 'tracker-dbms-recap',
+    });
+
+    const recap = buildDefaultRecapForTracker(dbmsTracker, 5);
+    assert.ok(
+      recap.summary.includes('DBMS'),
+      `Expected recap summary to reference DBMS, got: ${recap.summary}`
+    );
+    assert.ok(
+      !recap.summary.includes('Big-O') && !recap.summary.includes('sticky notes'),
+      'Recap summary must not contain hardcoded DSA Big-O / Recursion text for a DBMS course'
+    );
+    assert.ok(
+      !recap.practicalChallenges.some(c => c.title.includes('Reverse an Array Using Two Pointers')),
+      'Recap challenges must not contain hardcoded DSA Reverse an Array challenge'
+    );
+  });
 });
 
 describe('Unit Tests: Repository Documentation (README.md) Verification (TDD)', () => {
@@ -489,4 +608,151 @@ describe('Unit Tests: Repository Documentation (README.md) Verification (TDD)', 
   });
 });
 
+describe('Unit Tests: Universal Learner Roles, Flexible Pacing & Skill Milestones (TDD)', () => {
+  test('LEARNER_ROLE_OPTIONS supports diverse professional and learner categories beyond college students', () => {
+    const roles = LEARNER_ROLE_OPTIONS.map(r => r.role);
+    assert.ok(roles.includes('Software Engineer'));
+    assert.ok(roles.includes('Working Professional'));
+    assert.ok(roles.includes('Freelancer & Consultant'));
+    assert.ok(roles.includes('Career Switcher'));
+    assert.ok(roles.includes('University Student'));
+    assert.ok(roles.includes('Lifelong Learner'));
+  });
 
+  test('applyPacingPresetToProfile configures after-work and weekend-sprint study schedules accurately', () => {
+    const baseProfile = createDefaultLearnerProfile('Software Engineer');
+    assert.equal(baseProfile.role, 'Software Engineer');
+
+    const afterWorkProfile = applyPacingPresetToProfile(baseProfile, 'after-work');
+    assert.equal(afterWorkProfile.pacingMode, 'after-work');
+    assert.deepEqual(afterWorkProfile.studyDays, [1, 2, 3, 4, 5]); // Mon-Fri after office hours
+    assert.equal(afterWorkProfile.dailyMinutesTarget, 45);
+    assert.equal(afterWorkProfile.preferredTime, '21:00');
+
+    const weekendProfile = applyPacingPresetToProfile(baseProfile, 'weekend-sprint');
+    assert.equal(weekendProfile.pacingMode, 'weekend-sprint');
+    assert.deepEqual(weekendProfile.studyDays, [0, 6]); // Sat-Sun deep-dive
+    assert.equal(weekendProfile.dailyMinutesTarget, 120);
+  });
+
+  test('applyProfilePacingToTracker synchronizes custom learner pacing and daily study target with active course', () => {
+    const profile = applyPacingPresetToProfile(
+      createDefaultLearnerProfile('Freelancer & Consultant'),
+      'after-work'
+    );
+    const updatedTracker = applyProfilePacingToTracker(PRESET_TRACKERS[0], profile);
+
+    assert.equal(updatedTracker.dailyMinutesTarget, 45);
+    assert.equal(updatedTracker.scheduledTime, '21:00');
+    assert.deepEqual(updatedTracker.studyDays, [1, 2, 3, 4, 5]);
+  });
+
+  test('computeSkillMilestones generates universal career and skill development milestones tailored to learner role', () => {
+    const proProfile = createDefaultLearnerProfile('Working Professional');
+    const milestones = computeSkillMilestones(PRESET_TRACKERS[0], proProfile, 5);
+
+    assert.equal(milestones.length, 3);
+    assert.ok(
+      milestones.some(m => m.categoryLabel.includes('Working Professional') || m.title.includes('Skill')),
+      'Milestones must reflect universal professional/skill development'
+    );
+    assert.ok(
+      !milestones.some(m => m.title.toLowerCase().includes('semester') || m.title.toLowerCase().includes('bca')),
+      'Milestones must not contain college-only BCA/semester terms'
+    );
+  });
+});
+
+describe('Unit Tests: Profile Course Analytics & History Breakdown (TDD)', () => {
+  test('analyzeSingleCourseStatus classifies Pending (0%), In Progress (partial), and Completed (100%) courses accurately', () => {
+    // 1. Pending course (0 lessons completed)
+    const pendingCourse = buildDynamicTrackerFromInput({
+      inputUrl: 'https://www.youtube.com/playlist?list=PLMCXHnjXnTnvo6alSjVkgxV-VH6EPyvoX',
+      rawTopic: 'System Design Architecture',
+      trackerId: 'tracker-pending-test',
+    });
+    const pendingItem = analyzeSingleCourseStatus(pendingCourse);
+    assert.equal(pendingItem.status, 'pending');
+    assert.equal(pendingItem.progressPercent, 0);
+    assert.equal(pendingItem.completedLessonsCount, 0);
+    assert.equal(pendingItem.minutesLogged, 0);
+    assert.ok(pendingItem.currentLessonTitle, 'Pending course should show first lesson milestone');
+
+    // 2. In-Progress course (1 lesson completed)
+    const firstLessonId = pendingCourse.modules[0].lessons[0].id;
+    const inProgressCourse = completeLessonInTracker(
+      pendingCourse,
+      firstLessonId,
+      'Completed Lesson 1',
+      '2026-10-15T14:30:00.000Z'
+    );
+    const inProgressItem = analyzeSingleCourseStatus(inProgressCourse);
+    assert.equal(inProgressItem.status, 'in_progress');
+    assert.equal(inProgressItem.completedLessonsCount, 1);
+    assert.ok(inProgressItem.progressPercent > 0 && inProgressItem.progressPercent < 100);
+    assert.ok(inProgressItem.minutesLogged > 0);
+    assert.equal(
+      inProgressItem.currentLessonTitle,
+      inProgressCourse.modules[0].lessons[1].title,
+      'In-progress course should report the current uncompleted lesson milestone'
+    );
+
+    // 3. Completed course (100% lessons completed)
+    const completedCourse = markEntireCourseCompleted(
+      inProgressCourse,
+      '2026-10-28T19:00:00.000Z'
+    );
+    const completedItem = analyzeSingleCourseStatus(completedCourse);
+    assert.equal(completedItem.status, 'completed');
+    assert.equal(completedItem.progressPercent, 100);
+    assert.equal(completedItem.completedLessonsCount, completedItem.totalLessonsCount);
+    assert.equal(completedItem.completedAt, '2026-10-28T19:00:00.000Z');
+    assert.equal(completedItem.minutesLogged, completedItem.estimatedTotalMinutes);
+  });
+
+  test('computeProfileCourseAnalytics aggregates total courses, completed vs in-progress vs pending counts, and overall learning hours logged', () => {
+    const pendingTracker = buildDynamicTrackerFromInput({
+      inputUrl: 'https://www.youtube.com/playlist?list=PL_PENDING',
+      rawTopic: 'Docker & Kubernetes',
+      trackerId: 't-pending',
+    });
+
+    const inProgressTracker = structuredClone(PRESET_TRACKERS[0]); // 2 lessons completed (35 + 42 = 77 mins)
+
+    const completedTracker = markEntireCourseCompleted(
+      buildDynamicTrackerFromInput({
+        inputUrl: 'https://www.youtube.com/playlist?list=PL_DONE',
+        rawTopic: 'SQL & DBMS Mastery',
+        trackerId: 't-completed',
+      }),
+      '2026-10-30T18:00:00.000Z'
+    );
+
+    const summary = computeProfileCourseAnalytics([
+      completedTracker,
+      inProgressTracker,
+      pendingTracker,
+    ]);
+
+    assert.equal(summary.totalCourses, 3);
+    assert.equal(summary.completedCount, 1);
+    assert.equal(summary.inProgressCount, 1);
+    assert.equal(summary.pendingCount, 1);
+    assert.equal(summary.completedCourses.length, 1);
+    assert.equal(summary.inProgressCourses.length, 1);
+    assert.equal(summary.pendingCourses.length, 1);
+    assert.ok(summary.totalMinutesLogged > 77, 'Should sum logged minutes across all tracks');
+    assert.ok(summary.totalHoursLogged > 1, 'Should compute total learning hours across all subjects');
+  });
+
+  test('resetCourseToPending resets completed lessons to 0% pending state', () => {
+    const completed = markEntireCourseCompleted(PRESET_TRACKERS[0], '2026-10-20T12:00:00.000Z');
+    assert.equal(analyzeSingleCourseStatus(completed).status, 'completed');
+
+    const reset = resetCourseToPending(completed);
+    const statusAfter = analyzeSingleCourseStatus(reset);
+    assert.equal(statusAfter.status, 'pending');
+    assert.equal(statusAfter.completedLessonsCount, 0);
+    assert.equal(statusAfter.minutesLogged, 0);
+  });
+});

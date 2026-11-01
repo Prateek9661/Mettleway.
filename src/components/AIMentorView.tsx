@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Tracker, Lesson, AIRecapData, ConceptTutorAnswer } from '../types';
 import { aiMentorStorage, buildSmartConceptFallback } from '../utils/aiMentorCache';
+import { buildDefaultRecapForTracker } from '../utils/studyWorkspaceLogic';
 
 interface AIMentorViewProps {
   tracker: Tracker;
@@ -59,37 +60,11 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
     return completedLessons.map(l => l.id).join('-');
   }, [completedLessons]);
 
-  // Recap State initialized from localStorage if available
+  // Recap State initialized dynamically for the active course (never hardcoded DSA when on another subject)
   const [recapData, setRecapData] = useState<AIRecapData>(() => {
     const cached = aiMentorStorage.getDailyRecap(tracker.title, completedSignature);
     if (cached) return cached;
-    return {
-      summary: `Over the past ${Math.max(streakDays, 2)} days, you've mastered how to measure code speed (Big-O) and how functions call themselves (Recursion). Think of Big-O as a way to see how your code handles 1 million items instead of just 10, and think of Recursion like a stack of sticky notes where each step waits for a simpler step to finish until hitting the Base Case.`,
-      practicalChallenges: [
-        {
-          title: 'Reverse an Array Using Two Pointers',
-          difficulty: 'Easy',
-          description:
-            'Swap the first and last elements, then move both pointers inward until they meet in the middle.',
-          starterHint:
-            'Stop when left >= right. Swap arr[left] and arr[right], then move left + 1 and right - 1.',
-        },
-        {
-          title: 'Check if Two Words are Anagrams in One Pass',
-          difficulty: 'Medium',
-          description:
-            'Given two strings s and t, check if they use the exact same letters the same number of times in O(N) time.',
-          starterHint:
-            'Use a frequency map (or array of 26 letters): +1 for every letter in s, -1 for every letter in t, then check if all counts are 0.',
-        },
-      ],
-      pitfalls: [
-        'Forgetting the Base Case (the stop condition) in recursion, which makes the function run forever until memory overflows.',
-        'Using nested loops O(N²) when a simple Hash Map can remember seen numbers in 1 step O(N).',
-      ],
-      mentorAdvice:
-        'Before writing code, always trace a tiny 3-item example on paper. Once you see how those 3 items move, the code writes itself!',
-    };
+    return buildDefaultRecapForTracker(tracker, streakDays);
   });
 
   const [isLoadingRecap, setIsLoadingRecap] = useState<boolean>(false);
@@ -130,7 +105,18 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
     ];
   }, [currentLesson, explanationStyle]);
 
-  // Load previously asked doubts from localStorage whenever lesson changes
+  // Load previously asked doubts and reset tutor/recap state whenever active course or lesson changes
+  useEffect(() => {
+    const cached = aiMentorStorage.getDailyRecap(tracker.title, completedSignature);
+    setRecapData(cached || buildDefaultRecapForTracker(tracker, streakDays));
+    setTutorAnswer(null);
+    setUserQuestion('');
+    setUserCode('');
+    setQuizSelection(null);
+    setHasAnsweredQuiz(false);
+    setRevealedHints({});
+  }, [tracker.id, tracker.sourceUrl, tracker.title, completedSignature]);
+
   useEffect(() => {
     const list = aiMentorStorage.getPreviousQuestionsForLesson(tracker.title, currentLesson?.title || '');
     setPreviousDoubts(list.map(e => ({ question: e.question, timestamp: e.timestamp })));
@@ -157,7 +143,12 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
           recentLessons:
             recent.length > 0
               ? recent
-              : [{ title: 'Foundations & Complexity', keyConcepts: ['Big-O', 'Recursion'] }],
+              : [
+                  {
+                    title: currentLesson?.title || tracker.title,
+                    keyConcepts: currentLesson?.keyConcepts || [tracker.category],
+                  },
+                ],
           streak: streakDays,
           currentModule: tracker.modules[0]?.title,
         }),

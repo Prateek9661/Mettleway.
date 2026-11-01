@@ -18,8 +18,10 @@ import {
   GraduationCap,
   Map,
   Shield,
+  Briefcase,
+  Target,
 } from 'lucide-react';
-import { Tracker, Lesson, StudyTask } from '../types';
+import { Tracker, Lesson, StudyTask, LearnerProfile } from '../types';
 import { soundAlert } from '../utils/audioAlert';
 import {
   getCurrentUncompletedLesson,
@@ -28,6 +30,9 @@ import {
   filterStudyTasks,
   getCourseThemeTokens,
   resolveLessonVideoUrl,
+  computeSkillMilestones,
+  createDefaultLearnerProfile,
+  computeProfileCourseAnalytics,
 } from '../utils/studyWorkspaceLogic';
 import { ConfettiCelebration } from './ConfettiCelebration';
 
@@ -41,6 +46,9 @@ interface TodaySessionProps {
   onOpenCreateModal: () => void;
   isDeepWork?: boolean;
   onToggleDeepWork?: () => void;
+  learnerProfile?: LearnerProfile;
+  onOpenProfileModal?: () => void;
+  allTrackers?: Tracker[];
 }
 
 export const TodaySession: React.FC<TodaySessionProps> = ({
@@ -53,7 +61,29 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   onOpenCreateModal,
   isDeepWork = false,
   onToggleDeepWork,
+  learnerProfile,
+  onOpenProfileModal,
+  allTrackers,
 }) => {
+  const effectiveProfile = React.useMemo(
+    () => learnerProfile || createDefaultLearnerProfile('Software Engineer'),
+    [learnerProfile]
+  );
+  const skillMilestones = React.useMemo(
+    () => computeSkillMilestones(activeTracker, effectiveProfile, streakDays),
+    [activeTracker, effectiveProfile, streakDays]
+  );
+  const portfolioAnalytics = React.useMemo(
+    () =>
+      computeProfileCourseAnalytics(
+        allTrackers && allTrackers.length > 0
+          ? allTrackers
+          : activeTracker
+          ? [activeTracker]
+          : []
+      ),
+    [allTrackers, activeTracker]
+  );
   // Timer state
   const defaultMinutes = activeTracker?.dailyMinutesTarget || 60;
   const [secondsRemaining, setSecondsRemaining] = useState<number>(defaultMinutes * 60);
@@ -425,6 +455,30 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 {activeTracker.description ||
                   'Check off your daily study tasks below, watch your scheduled lesson, and clear any concept doubts with your AI Professor Mentor.'}
               </p>
+              {/* Universal Learner Role & Career Goal Line */}
+              <div className="pt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <span className="inline-flex items-center gap-1 font-semibold text-slate-800">
+                  <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>{effectiveProfile.role}</span>
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1 text-slate-600">
+                  <Target className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Goal: {effectiveProfile.careerObjective}</span>
+                </span>
+                {onOpenProfileModal && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <button
+                      type="button"
+                      onClick={onOpenProfileModal}
+                      className="text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                    >
+                      Customize Role &amp; Pacing
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Course Completion Bar & Quick Study Actions */}
@@ -974,6 +1028,91 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Career & Skill Development Milestones + Course Portfolio Card (Hidden in Deep Work mode) */}
+          {!isDeepWork && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Profile &amp; Career Milestones
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {effectiveProfile.role} · {effectiveProfile.weeklyHoursGoal}h/wk pace
+                  </p>
+                </div>
+                {onOpenProfileModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenProfileModal}
+                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    Course History &amp; Goals
+                  </button>
+                )}
+              </div>
+
+              {/* Compact Course Portfolio Summary Strip */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-800">
+                    Course Portfolio ({portfolioAnalytics.totalCourses} Tracks)
+                  </span>
+                  <span className="font-mono tabular-nums font-bold text-indigo-600">
+                    {portfolioAnalytics.totalHoursLogged} hrs logged
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-slate-600">
+                  <span className="text-emerald-700 font-semibold">
+                    ✓ {portfolioAnalytics.completedCount} Completed
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-indigo-600 font-semibold">
+                    ● {portfolioAnalytics.inProgressCount} In Progress
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-slate-600 font-semibold">
+                    ○ {portfolioAnalytics.pendingCount} Pending
+                  </span>
+                </div>
+                {onOpenProfileModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenProfileModal}
+                    className="w-full mt-1 py-1.5 px-3 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 transition-colors cursor-pointer"
+                  >
+                    View Completed, Active &amp; Saved Courses &rarr;
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-3.5">
+                {skillMilestones.map(ms => (
+                  <div key={ms.id} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-800 truncate pr-2">
+                        {ms.title}
+                      </span>
+                      <span className="font-mono tabular-nums font-bold text-slate-900 shrink-0">
+                        {ms.progressPercent}%
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${
+                          ms.completed ? 'bg-emerald-600' : 'bg-indigo-600'
+                        } rounded-full transition-all duration-500`}
+                        style={{ width: `${ms.progressPercent}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-snug">
+                      {ms.targetDescription}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Previous Lesson Revision Card (Hidden in Deep Work mode) */}
           {!isDeepWork && recentlyCompletedLesson && (

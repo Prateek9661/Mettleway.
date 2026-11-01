@@ -126,4 +126,77 @@ export interface ConceptTutorAnswer {
   };
 }
 
+export type LearnerRole =
+  | 'Software Engineer'
+  | 'Working Professional'
+  | 'Freelancer & Consultant'
+  | 'Career Switcher'
+  | 'University Student'
+  | 'Lifelong Learner'
+  | string;
 
+export type PacingMode =
+  | 'after-work'
+  | 'weekend-sprint'
+  | 'steady-daily'
+  | 'intensive-bootcamp'
+  | 'exam-prep';
+
+export interface LearnerProfile {
+  name: string;
+  role: LearnerRole;
+  careerObjective: string;
+  pacingMode: PacingMode;
+  dailyMinutesTarget: number;
+  preferredTime: string; // HH:MM 24h format
+  studyDays: number[]; // [0..6]
+  weeklyHoursGoal: number;
+}
+
+export interface SkillMilestone {
+  id: string;
+  title: string;
+  categoryLabel: string;
+  progressPercent: number;
+  completed: boolean;
+  targetDescription: string;
+}
+
+export type CourseStatusCategory = 'completed' | 'in_progress' | 'pending';
+
+export interface CourseAnalyticsItem {
+  trackerId: string;
+  title: string;
+  category: string;
+  difficulty: string;
+  instructor: string;
+  sourceUrl: string;
+  status: CourseStatusCategory;
+  completedLessonsCount: number;
+  totalLessonsCount: number;
+  progressPercent: number;
+  minutesLogged: number;
+  estimatedTotalMinutes: number;
+  hoursLogged: number;
+  estimatedTotalHours: number;
+  completedAt?: string;
+  currentLessonTitle?: string;
+  currentModuleTitle?: string;
+  createdAt: string;
+}
+
+export interface ProfileCourseAnalyticsSummary {
+  totalCourses: number;
+  completedCount: number;
+  inProgressCount: number;
+  pendingCount: number;
+  totalMinutesLogged: number;
+  totalHoursLogged: number;
+  totalLessonsCompleted: number;
+  totalLessonsAvailable: number;
+  overallCompletionPercent: number;
+  completedCourses: CourseAnalyticsItem[];
+  inProgressCourses: CourseAnalyticsItem[];
+  pendingCourses: CourseAnalyticsItem[];
+  allCourses: CourseAnalyticsItem[];
+}

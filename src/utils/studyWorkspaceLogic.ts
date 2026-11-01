@@ -1,4 +1,17 @@
-import { Tracker, Module, Lesson, StudyTask } from '../types';
+import {
+  Tracker,
+  Module,
+  Lesson,
+  StudyTask,
+  AIRecapData,
+  LearnerProfile,
+  LearnerRole,
+  PacingMode,
+  SkillMilestone,
+  CourseStatusCategory,
+  CourseAnalyticsItem,
+  ProfileCourseAnalyticsSummary,
+} from '../types';
 
 export type NavTab = 'today' | 'curriculum' | 'mentor' | 'squads' | 'schedule';
 
@@ -257,7 +270,8 @@ export function parseYouTubeSourceUrl(rawUrl: string): ParsedYouTubeSource {
 /**
  * Dynamically binds a lesson's videoUrl to its specific lecture in the active course's
  * YouTube playlist (`&index=N` + specific `videoId` if scraped) or specific timestamp (`&t=...s`)
- * for single long-form lecture videos, so clicking Lesson 2 or Lesson 3 navigates directly to that lecture.
+ * for single long-form lecture videos, so clicking Lesson 2 or Lesson 3 navigates directly to that lecture
+ * and NEVER repeats Lesson 1's videoId on subsequent lessons.
  */
 export function resolveLessonVideoUrl(
   courseSourceUrl: string,
@@ -269,7 +283,7 @@ export function resolveLessonVideoUrl(
   const trimmedSource = (courseSourceUrl || '').trim();
   const isHttpUrl = /^https?:\/\//i.test(trimmedSource);
 
-  // Check if lessonVideoUrl already has a specific scraped videoId for this playlist/index
+  // Check if lessonVideoUrl already has a specific scraped or curated videoId for this playlist/index
   const trimmedLessonUrl = (lessonVideoUrl || '').trim();
   const isPlaceholderLessonUrl =
     !trimmedLessonUrl ||
@@ -284,22 +298,28 @@ export function resolveLessonVideoUrl(
     // Case 1: Course source is a YouTube Playlist or a Video inside a Playlist (has list=...)
     if (parsedSource.isYouTube && parsedSource.playlistId) {
       const targetIndex = lessonIndex + 1;
-      // If lessonVideoUrl already has a specific scraped videoId from this same playlist, preserve its v= and set exact index
+
+      // If lessonVideoUrl has a valid specific videoId for this playlist (and for Lesson 2+, is NOT repeating Lesson 1's videoId), preserve its v= and set exact index
       if (!isPlaceholderLessonUrl) {
         const parsedLesson = parseYouTubeSourceUrl(trimmedLessonUrl);
-        if (parsedLesson.videoId && parsedLesson.playlistId === parsedSource.playlistId) {
+        const isDistinctFromFirstVideo =
+          lessonIndex === 0 || !parsedSource.videoId || parsedLesson.videoId !== parsedSource.videoId;
+        if (
+          parsedLesson.videoId &&
+          parsedLesson.playlistId === parsedSource.playlistId &&
+          isDistinctFromFirstVideo
+        ) {
           return `https://www.youtube.com/watch?v=${parsedLesson.videoId}&list=${parsedSource.playlistId}&index=${targetIndex}`;
         }
       }
 
-      // If the user provided the first video link of a playlist (watch?v=VID&list=PL...), Lesson 1 uses that videoId + list + index=1
+      // If the user provided the first video link of a playlist (watch?v=VID&list=PL...), ONLY Lesson 1 (lessonIndex === 0) may use that first video's v=VID
       if (parsedSource.videoId && lessonIndex === 0) {
         return `https://www.youtube.com/watch?v=${parsedSource.videoId}&list=${parsedSource.playlistId}&index=1`;
       }
 
-      const cleanUrl = trimmedSource.replace(/([?&])index=\d+/g, '');
-      const separator = cleanUrl.includes('?') ? '&' : '?';
-      return `${cleanUrl}${separator}index=${targetIndex}`;
+      // For Lesson 2, Lesson 3, etc. when no distinct per-lesson videoId was scraped, strip v=FIRST_VID so Lesson 1's video NEVER repeats!
+      return `https://www.youtube.com/playlist?list=${parsedSource.playlistId}&index=${targetIndex}`;
     }
 
     // Case 2: Course source is a single YouTube video (has videoId, no playlistId)
@@ -316,7 +336,10 @@ export function resolveLessonVideoUrl(
 
     // Case 3: Generic playlist URL with list=
     if (trimmedSource.includes('list=')) {
-      const cleanUrl = trimmedSource.replace(/([?&])index=\d+/g, '');
+      const cleanUrl = trimmedSource
+        .replace(/([?&])index=\d+/g, '')
+        .replace(/([?&])v=[^&]+&?/g, '$1')
+        .replace(/\?&/, '?');
       const separator = cleanUrl.includes('?') ? '&' : '?';
       return `${cleanUrl}${separator}index=${lessonIndex + 1}`;
     }
@@ -341,12 +364,18 @@ export type SubjectKey =
   | 'dsa'
   | 'custom';
 
-// Known playlist IDs or keywords for popular YouTube courses
+// Known playlist IDs or video IDs for popular YouTube courses so URL-only imports immediately detect subject, title, and instructor
 const KNOWN_YOUTUBE_PLAYLIST_HINTS: Record<
   string,
   { title: string; instructor: string; topic: SubjectKey; category: string }
 > = {
   plxczcowd7aifan6i8cuvibucdjgiokt2y: {
+    title: 'DBMS (Database Management Systems) Complete Playlist',
+    instructor: 'Gate Smashers',
+    topic: 'dbms',
+    category: 'DBMS & SQL',
+  },
+  kbdlm6hndae: {
     title: 'DBMS (Database Management Systems) Complete Playlist',
     instructor: 'Gate Smashers',
     topic: 'dbms',
@@ -358,7 +387,37 @@ const KNOWN_YOUTUBE_PLAYLIST_HINTS: Record<
     topic: 'dbms',
     category: 'DBMS & SQL',
   },
+  plxczcowd7aigz9donhrre9i3mwn6xdp8p: {
+    title: 'Operating Systems (OS) Complete Placement & GATE Series',
+    instructor: 'Gate Smashers',
+    topic: 'os',
+    category: 'Operating Systems',
+  },
+  bkswjjzngf8: {
+    title: 'Operating Systems (OS) Complete Placement & GATE Series',
+    instructor: 'Gate Smashers',
+    topic: 'os',
+    category: 'Operating Systems',
+  },
+  'plxczcowd7aigfbd2-2jocpwolurdlvvv_': {
+    title: 'Computer Networks (CN) Complete Course',
+    instructor: 'Gate Smashers',
+    topic: 'cn',
+    category: 'Computer Networks',
+  },
+  jfvxyj9bbkw: {
+    title: 'Computer Networks (CN) Complete Course',
+    instructor: 'Gate Smashers',
+    topic: 'cn',
+    category: 'Computer Networks',
+  },
   plu0w_9lii9agwh1xjrt242xiphpt2llg: {
+    title: 'Python Programming Complete Bootcamp (100 Days of Code)',
+    instructor: 'CodeWithHarry',
+    topic: 'python',
+    category: 'AI & ML',
+  },
+  '7wnove7kc-q': {
     title: 'Python Programming Complete Bootcamp (100 Days of Code)',
     instructor: 'CodeWithHarry',
     topic: 'python',
@@ -376,11 +435,29 @@ const KNOWN_YOUTUBE_PLAYLIST_HINTS: Record<
     topic: 'python',
     category: 'AI & ML',
   },
+  plu71skxnbfodqgpchmvisl4htnjirtige: {
+    title: 'Chai aur Javascript & Full-Stack Web Development',
+    instructor: 'Chai aur Code (Hitesh Choudhary)',
+    topic: 'web',
+    category: 'Web Development',
+  },
   hdi2bqojy3c: {
     title: 'JavaScript Crash Course & Modern ES6+',
     instructor: 'Traversy Media',
     topic: 'web',
     category: 'Web Development',
+  },
+  plzotaelrmxvpbtrwtjkn3wwqxzkmtxgwe: {
+    title: 'Complete Machine Learning & Data Science Bootcamp',
+    instructor: 'Krish Naik',
+    topic: 'ai',
+    category: 'AI & ML',
+  },
+  plguwdvibif0of6ql8m22w1hidc1vj_bhz: {
+    title: "Striver's A2Z DSA Course / Sheet",
+    instructor: 'take U forward (Striver)',
+    topic: 'dsa',
+    category: 'DSA',
   },
 };
 
@@ -615,6 +692,7 @@ function buildCuratedModulesForSubject(
   lessons: Array<{
     title: string;
     durationMinutes: number;
+    videoUrl?: string;
     keyConcepts: string[];
     practiceTask: string;
   }>;
@@ -628,18 +706,21 @@ function buildCuratedModulesForSubject(
           {
             title: 'Lesson 1: Introduction to DBMS, File System vs DBMS & 3-Tier Schema Architecture',
             durationMinutes: 35,
+            videoUrl: 'https://www.youtube.com/watch?v=kBdlM6hNDAE&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=1',
             keyConcepts: ['Physical vs Logical Independence', '3-Schema Architecture', 'DBA Role & DBMS Internals'],
             practiceTask: 'Draw the 3-level ANSI-SPARC architecture and trace how a query maps from view level to physical storage',
           },
           {
             title: 'Lesson 2: Entity-Relationship (ER) Model, Attributes & Relational Keys',
             durationMinutes: 40,
+            videoUrl: 'https://www.youtube.com/watch?v=3EJlovevfcA&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=2',
             keyConcepts: ['Super, Candidate, Primary & Foreign Keys', 'Strong vs Weak Entities', 'Cardinality Ratios (1:1, 1:N, M:N)'],
             practiceTask: 'Design a complete ER diagram for a University Course Enrollment system and convert ER tables into relational schemas',
           },
           {
             title: 'Lesson 3: Relational Model, Integrity Constraints & Relational Algebra Operations',
             durationMinutes: 45,
+            videoUrl: 'https://www.youtube.com/watch?v=pDX4NR4eY3A&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=3',
             keyConcepts: ['Referential Integrity', 'Selection (σ) & Projection (π)', 'Natural Join vs Outer Joins', 'Division Operator'],
             practiceTask: 'Write relational algebra expressions for 5 complex multi-table queries before writing SQL',
           },
@@ -652,18 +733,21 @@ function buildCuratedModulesForSubject(
           {
             title: 'Lesson 4: Structured Query Language (SQL) — DDL, DML, Joins, GROUP BY & Subqueries',
             durationMinutes: 50,
+            videoUrl: 'https://www.youtube.com/watch?v=ADb5TW09bdE&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=4',
             keyConcepts: ['INNER, LEFT, RIGHT & FULL Joins', 'GROUP BY & HAVING', 'Correlated Subqueries', 'Window Functions'],
             practiceTask: 'Write SQL queries to find the Nth highest salary and department-wise top earners using both subqueries and window functions',
           },
           {
             title: 'Lesson 5: Functional Dependencies, Armstrong Axioms & Attribute Closure',
             durationMinutes: 40,
+            videoUrl: 'https://www.youtube.com/watch?v=wClEbCyWryI&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=5',
             keyConcepts: ['Trivial vs Non-Trivial FD', 'Attribute Closure (X+)', 'Canonical Cover', 'Lossless Join Decomposition'],
             practiceTask: 'Compute attribute closures to find all candidate keys of a given relation R(A,B,C,D,E)',
           },
           {
             title: 'Lesson 6: Database Normalization — 1NF, 2NF, 3NF & Boyce-Codd Normal Form (BCNF)',
             durationMinutes: 45,
+            videoUrl: 'https://www.youtube.com/watch?v=5GDTIUVlHB8&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=6',
             keyConcepts: ['Insertion/Deletion/Update Anomalies', 'Partial Dependency (2NF)', 'Transitive Dependency (3NF)', 'BCNF Decomposition'],
             practiceTask: 'Normalize an unnormalized e-commerce order table step-by-step from 1NF through BCNF',
           },
@@ -676,12 +760,14 @@ function buildCuratedModulesForSubject(
           {
             title: 'Lesson 7: Transactions, ACID Properties, Schedules & Conflict Serializability',
             durationMinutes: 45,
+            videoUrl: 'https://www.youtube.com/watch?v=t5hsV9lC1rU&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=7',
             keyConcepts: ['Atomicity, Consistency, Isolation, Durability', 'Read-Write Conflicts', 'Precedence Graph', 'Two-Phase Locking (2PL)'],
             practiceTask: 'Construct a precedence graph for a 3-transaction schedule to test whether it is conflict serializable',
           },
           {
             title: 'Lesson 8: Database Indexing, B-Trees, B+ Trees & Query Optimization',
             durationMinutes: 40,
+            videoUrl: 'https://www.youtube.com/watch?v=E--yzX05_k8&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y&index=8',
             keyConcepts: ['Clustered vs Non-Clustered Index', 'B+ Tree Leaf Linked List', 'Hash Indexing', 'EXPLAIN Query Plan'],
             practiceTask: 'Compare query execution times with and without composite B+ Tree indexes on a sample table',
           },
@@ -699,18 +785,21 @@ function buildCuratedModulesForSubject(
           {
             title: 'Lesson 1: OS Architecture, Kernel vs User Mode & System Calls',
             durationMinutes: 35,
+            videoUrl: 'https://www.youtube.com/watch?v=bkSWJJZNgf8&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p&index=1',
             keyConcepts: ['Monolithic vs Microkernel', 'System Calls (fork, exec, wait)', 'Context Switching'],
             practiceTask: 'Trace the lifecycle of a process creation using fork() and exec() system calls',
           },
           {
             title: 'Lesson 2: Process States, PCB, Threads & Multithreading Models',
             durationMinutes: 40,
+            videoUrl: 'https://www.youtube.com/watch?v=OrM7nZcxXZU&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p&index=2',
             keyConcepts: ['5-State Process Model', 'Process Control Block (PCB)', 'User vs Kernel Threads'],
             practiceTask: 'Compare memory layout shared between threads vs isolated processes',
           },
           {
             title: 'Lesson 3: CPU Scheduling — FCFS, SJF, SRTF, Round Robin & Priority',
             durationMinutes: 45,
+            videoUrl: 'https://www.youtube.com/watch?v=EWkQl0n0w5M&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p&index=3',
             keyConcepts: ['Turnaround Time & Waiting Time', 'Convoy Effect', 'Time Quantum in Round Robin', 'Starvation & Aging'],
             practiceTask: 'Draw Gantt charts and compute average waiting time for 5 processes under SRTF and Round Robin',
           },
@@ -723,18 +812,21 @@ function buildCuratedModulesForSubject(
           {
             title: 'Lesson 4: Process Synchronization, Critical Section, Mutex & Semaphores',
             durationMinutes: 45,
+            videoUrl: 'https://www.youtube.com/watch?v=Sw8M23WCr6I&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p&index=4',
             keyConcepts: ['Race Condition', 'Mutual Exclusion', 'Counting vs Binary Semaphores', 'Producer-Consumer Problem'],
             practiceTask: 'Write pseudocode using semaphores to solve the bounded-buffer Producer-Consumer problem without deadlock',
           },
           {
             title: 'Lesson 5: Deadlock Conditions, Resource Allocation Graph & Banker’s Algorithm',
             durationMinutes: 40,
+            videoUrl: 'https://www.youtube.com/watch?v=rWFH6PLOIEI&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p&index=5',
             keyConcepts: ['Coffman 4 Conditions', 'Safe State Sequence', 'Deadlock Avoidance vs Prevention'],
             practiceTask: 'Run Banker’s Algorithm on a 5-process, 3-resource matrix to determine the safe execution sequence',
           },
           {
             title: 'Lesson 6: Virtual Memory, Paging, TLB & Page Replacement (LRU, Optimal, FIFO)',
             durationMinutes: 45,
+            videoUrl: 'https://www.youtube.com/watch?v=qlH4-oHnBb8&list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p&index=6',
             keyConcepts: ['Page Table & TLB Hit Ratio', 'Page Fault Service Time', 'Belady Anomaly', 'LRU Page Replacement'],
             practiceTask: 'Calculate page fault counts for a reference string across FIFO, Optimal, and LRU replacement policies',
           },
@@ -1390,3 +1482,458 @@ export function sanitizeAndSyncTracker(tracker: Tracker): Tracker {
   return tracker;
 }
 
+/**
+ * Generates dynamic, course-specific AI Mentor Recap data (summary, practicalChallenges, pitfalls, mentorAdvice)
+ * for the active tracker so switching or adding a course completely resets stale DSA recap content.
+ */
+export function buildDefaultRecapForTracker(tracker: Tracker, streakDays: number = 4): AIRecapData {
+  const allLessons = tracker.modules.flatMap(m => m.lessons);
+  const completedLessons = allLessons.filter(l => l.completed);
+  const focusLessons = completedLessons.length > 0 ? completedLessons.slice(-2) : allLessons.slice(0, 2);
+
+  const firstLesson = focusLessons[0] || {
+    title: `${tracker.title} Fundamentals`,
+    keyConcepts: [tracker.category, 'Core Architecture'],
+    practiceTask: `Complete the hands-on exercise for ${tracker.title}`,
+  };
+  const secondLesson = focusLessons[1] || firstLesson;
+
+  const conceptA = firstLesson.keyConcepts?.[0] || firstLesson.title;
+  const conceptB = secondLesson.keyConcepts?.[1] || secondLesson.keyConcepts?.[0] || secondLesson.title;
+
+  return {
+    summary: `In your active "${tracker.title}" (${tracker.category}) track (${Math.max(
+      streakDays,
+      1
+    )}-day study streak), your current focus covers "${firstLesson.title}" and "${secondLesson.title}". Master the core mental model of ${conceptA} first, then connect it directly to ${conceptB} through hands-on implementation.`,
+    practicalChallenges: [
+      {
+        title: `Hands-On Lab: ${conceptA}`,
+        difficulty: 'Easy',
+        description:
+          firstLesson.practiceTask ||
+          `Build a clean, working implementation demonstrating ${conceptA} from "${firstLesson.title}".`,
+        starterHint: `Start by outlining the inputs, state transitions, and expected output for ${conceptA} on a small 3-item example.`,
+      },
+      {
+        title: `Applied Challenge: ${conceptB}`,
+        difficulty: 'Medium',
+        description:
+          secondLesson.practiceTask ||
+          `Apply ${conceptB} from "${secondLesson.title}" to solve a realistic scenario and verify edge cases.`,
+        starterHint: `Test boundary conditions and trace how ${conceptA} interacts with ${conceptB} step-by-step.`,
+      },
+    ],
+    pitfalls: [
+      `Watching "${firstLesson.title}" passively without completing the hands-on practice task ("${firstLesson.practiceTask}").`,
+      `Skipping edge-case verification when applying ${conceptA} and ${conceptB} in real-world scenarios.`,
+    ],
+    mentorAdvice: `While studying "${tracker.title}", pause after each lecture to summarize ${conceptA} in 2 sentences in your own words—active recall locks in mastery 3x faster.`,
+  };
+}
+
+/**
+ * Client-side YouTube metadata & playlist auto-detector (works in browser even on static deployments like Cloudflare Workers).
+ * Uses CORS-friendly noembed.com + known playlist catalog to auto-detect course title, instructor, and lectures.
+ */
+export async function fetchYouTubeMetadataClientSide(rawUrl: string): Promise<{
+  title: string;
+  instructor: string;
+  category: string;
+  playlistVideos?: ScrapedPlaylistVideoItem[];
+} | null> {
+  const trimmed = (rawUrl || '').trim();
+  const parsed = parseYouTubeSourceUrl(trimmed);
+  if (!parsed.isYouTube) return null;
+
+  const inferred = inferCourseMetadata(trimmed);
+  let title = '';
+  let instructor = '';
+
+  // Check known playlist/video hints first
+  for (const [idKey, meta] of Object.entries(KNOWN_YOUTUBE_PLAYLIST_HINTS)) {
+    if (trimmed.toLowerCase().includes(idKey.toLowerCase())) {
+      title = meta.title;
+      instructor = meta.instructor;
+      break;
+    }
+  }
+
+  // Query CORS-friendly noembed.com for any YouTube URL
+  try {
+    const targetUrl = parsed.videoId
+      ? `https://www.youtube.com/watch?v=${parsed.videoId}`
+      : trimmed;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    const res = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(targetUrl)}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.title && !title) {
+        title = String(data.title).trim();
+      }
+      if (data?.author_name && !instructor) {
+        instructor = String(data.author_name).trim();
+      }
+    }
+  } catch {
+    // Fallback to inferred metadata if offline
+  }
+
+  const finalMeta = inferCourseMetadata(trimmed, title, { title, instructor });
+  return {
+    title: title || finalMeta.defaultTitle,
+    instructor: instructor || finalMeta.defaultInstructor,
+    category: finalMeta.category || inferred.category,
+  };
+}
+
+export interface LearnerRoleOption {
+  role: LearnerRole;
+  description: string;
+  defaultObjective: string;
+  defaultPacing: PacingMode;
+}
+
+export const LEARNER_ROLE_OPTIONS: LearnerRoleOption[] = [
+  {
+    role: 'Software Engineer',
+    description: 'Deepening system design, cloud architecture, or AI engineering skills.',
+    defaultObjective: 'Master Scalable System Design & Production Engineering',
+    defaultPacing: 'after-work',
+  },
+  {
+    role: 'Working Professional',
+    description: 'Upskilling after office hours for career advancement or leadership transitions.',
+    defaultObjective: 'Advance Technical Depth & Ship High-Impact Projects After Hours',
+    defaultPacing: 'after-work',
+  },
+  {
+    role: 'Freelancer & Consultant',
+    description: 'Expanding technical stack to deliver end-to-end client solutions faster.',
+    defaultObjective: 'Master Full-Stack Delivery & Client Architecture Workflows',
+    defaultPacing: 'steady-daily',
+  },
+  {
+    role: 'Career Switcher',
+    description: 'Structured transition into software engineering, data science, or product roles.',
+    defaultObjective: 'Build Job-Ready Portfolio & Crack Technical Interviews',
+    defaultPacing: 'intensive-bootcamp',
+  },
+  {
+    role: 'University Student',
+    description: 'Building core computer science foundations, projects, and interview readiness.',
+    defaultObjective: 'Master Core Engineering Subjects & Problem-Solving',
+    defaultPacing: 'steady-daily',
+  },
+  {
+    role: 'Lifelong Learner',
+    description: 'Self-paced exploration of emerging technologies, AI, and creative coding.',
+    defaultObjective: 'Continuous Skill Mastery & Hands-On Exploration',
+    defaultPacing: 'weekend-sprint',
+  },
+];
+
+export interface PacingPresetConfig {
+  mode: PacingMode;
+  label: string;
+  subtitle: string;
+  dailyMinutesTarget: number;
+  preferredTime: string;
+  studyDays: number[];
+}
+
+export const PACING_PRESETS: PacingPresetConfig[] = [
+  {
+    mode: 'after-work',
+    label: 'After-Hours Upskilling',
+    subtitle: 'Mon–Fri · 45 mins/day · 21:00 (Ideal for working professionals)',
+    dailyMinutesTarget: 45,
+    preferredTime: '21:00',
+    studyDays: [1, 2, 3, 4, 5],
+  },
+  {
+    mode: 'weekend-sprint',
+    label: 'Weekend Deep-Dive Sprint',
+    subtitle: 'Sat–Sun · 120 mins/day · 10:00 (Focused weekend execution)',
+    dailyMinutesTarget: 120,
+    preferredTime: '10:00',
+    studyDays: [0, 6],
+  },
+  {
+    mode: 'steady-daily',
+    label: 'Steady Daily Habit',
+    subtitle: 'Mon–Sat · 60 mins/day · 20:00 (Consistent daily momentum)',
+    dailyMinutesTarget: 60,
+    preferredTime: '20:00',
+    studyDays: [1, 2, 3, 4, 5, 6],
+  },
+  {
+    mode: 'intensive-bootcamp',
+    label: 'Intensive Career Switch',
+    subtitle: 'Mon–Sat · 90 mins/day · 19:00 (Accelerated skill mastery)',
+    dailyMinutesTarget: 90,
+    preferredTime: '19:00',
+    studyDays: [1, 2, 3, 4, 5, 6],
+  },
+  {
+    mode: 'exam-prep',
+    label: 'Certification & Core Prep',
+    subtitle: 'Daily · 75 mins/day · 18:30 (Structured concept & practice drills)',
+    dailyMinutesTarget: 75,
+    preferredTime: '18:30',
+    studyDays: [0, 1, 2, 3, 4, 5, 6],
+  },
+];
+
+export function createDefaultLearnerProfile(role: LearnerRole = 'Software Engineer'): LearnerProfile {
+  const roleConfig =
+    LEARNER_ROLE_OPTIONS.find(r => r.role === role) || LEARNER_ROLE_OPTIONS[0];
+  const pacingConfig =
+    PACING_PRESETS.find(p => p.mode === roleConfig.defaultPacing) || PACING_PRESETS[0];
+
+  const weeklyHoursGoal = Math.max(
+    1,
+    Math.round(((pacingConfig.dailyMinutesTarget * pacingConfig.studyDays.length) / 60) * 10) / 10
+  );
+
+  return {
+    name: 'Alex Rivera',
+    role: roleConfig.role,
+    careerObjective: roleConfig.defaultObjective,
+    pacingMode: pacingConfig.mode,
+    dailyMinutesTarget: pacingConfig.dailyMinutesTarget,
+    preferredTime: pacingConfig.preferredTime,
+    studyDays: [...pacingConfig.studyDays],
+    weeklyHoursGoal,
+  };
+}
+
+export function applyPacingPresetToProfile(
+  profile: LearnerProfile,
+  pacingMode: PacingMode
+): LearnerProfile {
+  const preset = PACING_PRESETS.find(p => p.mode === pacingMode) || PACING_PRESETS[0];
+  const weeklyHoursGoal = Math.max(
+    1,
+    Math.round(((preset.dailyMinutesTarget * preset.studyDays.length) / 60) * 10) / 10
+  );
+
+  return {
+    ...profile,
+    pacingMode: preset.mode,
+    dailyMinutesTarget: preset.dailyMinutesTarget,
+    preferredTime: preset.preferredTime,
+    studyDays: [...preset.studyDays],
+    weeklyHoursGoal,
+  };
+}
+
+export function applyProfilePacingToTracker(
+  tracker: Tracker,
+  profile: LearnerProfile
+): Tracker {
+  return {
+    ...tracker,
+    dailyMinutesTarget: profile.dailyMinutesTarget,
+    scheduledTime: profile.preferredTime,
+    studyDays: profile.studyDays.length > 0 ? [...profile.studyDays] : [1, 2, 3, 4, 5],
+  };
+}
+
+export function computeSkillMilestones(
+  tracker: Tracker | null,
+  profile: LearnerProfile,
+  streakDays: number
+): SkillMilestone[] {
+  const progress = calculateCourseProgress(tracker);
+  const allLessons = tracker ? tracker.modules.flatMap(m => m.lessons) : [];
+  const notesWrittenCount = allLessons.filter(l => l.notes && l.notes.trim().length > 5).length;
+  const appliedProgress =
+    allLessons.length > 0
+      ? Math.min(100, Math.round(((progress.completed + notesWrittenCount) / allLessons.length) * 100))
+      : 0;
+  const consistencyPercent = Math.min(100, Math.round((streakDays / 7) * 100));
+
+  const pacingLabel =
+    PACING_PRESETS.find(p => p.mode === profile.pacingMode)?.label || 'Custom Pacing';
+
+  return [
+    {
+      id: 'milestone-skill-mastery',
+      title: `Core Skill Mastery: ${tracker?.category || 'Technical Track'}`,
+      categoryLabel: `${profile.role} · Skill Execution`,
+      progressPercent: progress.percent,
+      completed: progress.percent >= 100,
+      targetDescription: `${progress.completed}/${progress.total} lectures completed toward "${profile.careerObjective}"`,
+    },
+    {
+      id: 'milestone-applied-execution',
+      title: 'Applied Implementation & Knowledge Retention',
+      categoryLabel: `${profile.role} · Practical Output`,
+      progressPercent: appliedProgress,
+      completed: appliedProgress >= 100,
+      targetDescription: `Hands-on exercises & documented takeaways across ${tracker?.title || 'active track'}`,
+    },
+    {
+      id: 'milestone-pacing-consistency',
+      title: `${pacingLabel} Habit (${profile.weeklyHoursGoal}h / week target)`,
+      categoryLabel: `${profile.role} · Pacing Consistency`,
+      progressPercent: consistencyPercent,
+      completed: streakDays >= 7,
+      targetDescription: `${streakDays}/7 consecutive active sessions logged at ${profile.preferredTime}`,
+    },
+  ];
+}
+
+// ============================================================================
+// Profile Course Analytics & History Breakdown
+// ============================================================================
+
+export function analyzeSingleCourseStatus(tracker: Tracker): CourseAnalyticsItem {
+  const allLessons: Array<{ lesson: Lesson; moduleTitle: string }> = [];
+  for (const mod of tracker.modules || []) {
+    for (const les of mod.lessons || []) {
+      allLessons.push({ lesson: les, moduleTitle: mod.title });
+    }
+  }
+
+  const totalLessonsCount = allLessons.length;
+  const completedEntries = allLessons.filter(e => e.lesson.completed);
+  const completedLessonsCount = completedEntries.length;
+
+  const progressPercent =
+    totalLessonsCount > 0 ? Math.round((completedLessonsCount / totalLessonsCount) * 100) : 0;
+
+  let status: CourseStatusCategory = 'pending';
+  if (totalLessonsCount > 0 && completedLessonsCount === totalLessonsCount) {
+    status = 'completed';
+  } else if (completedLessonsCount > 0) {
+    status = 'in_progress';
+  }
+
+  const minutesLogged = completedEntries.reduce(
+    (sum, e) => sum + (e.lesson.durationMinutes || 35),
+    0
+  );
+  const estimatedTotalMinutes =
+    allLessons.reduce((sum, e) => sum + (e.lesson.durationMinutes || 35), 0) ||
+    tracker.estimatedTotalMinutes ||
+    0;
+
+  const hoursLogged = Math.round((minutesLogged / 60) * 10) / 10;
+  const estimatedTotalHours = Math.round((estimatedTotalMinutes / 60) * 10) / 10;
+
+  let completedAt: string | undefined;
+  if (status === 'completed') {
+    const timestamps = completedEntries
+      .map(e => e.lesson.completedAt)
+      .filter((t): t is string => Boolean(t))
+      .sort();
+    completedAt = timestamps[timestamps.length - 1] || tracker.createdAt;
+  }
+
+  const firstUncompleted = allLessons.find(e => !e.lesson.completed);
+  const lastLesson = allLessons[allLessons.length - 1];
+
+  const currentLessonTitle =
+    status === 'completed'
+      ? lastLesson?.lesson.title || 'All Lectures Completed'
+      : firstUncompleted?.lesson.title || 'Lesson 1';
+
+  const currentModuleTitle =
+    status === 'completed'
+      ? lastLesson?.moduleTitle || 'Course Completed'
+      : firstUncompleted?.moduleTitle || tracker.modules[0]?.title || 'Module 1';
+
+  return {
+    trackerId: tracker.id,
+    title: tracker.title,
+    category: tracker.category,
+    difficulty: tracker.difficulty,
+    instructor: tracker.instructor,
+    sourceUrl: tracker.sourceUrl,
+    status,
+    completedLessonsCount,
+    totalLessonsCount,
+    progressPercent,
+    minutesLogged,
+    estimatedTotalMinutes,
+    hoursLogged,
+    estimatedTotalHours,
+    completedAt,
+    currentLessonTitle,
+    currentModuleTitle,
+    createdAt: tracker.createdAt,
+  };
+}
+
+export function computeProfileCourseAnalytics(
+  trackers: Tracker[]
+): ProfileCourseAnalyticsSummary {
+  const allCourses = (trackers || []).map(t => analyzeSingleCourseStatus(t));
+  const completedCourses = allCourses.filter(c => c.status === 'completed');
+  const inProgressCourses = allCourses.filter(c => c.status === 'in_progress');
+  const pendingCourses = allCourses.filter(c => c.status === 'pending');
+
+  const totalMinutesLogged = allCourses.reduce((sum, c) => sum + c.minutesLogged, 0);
+  const totalHoursLogged = Math.round((totalMinutesLogged / 60) * 10) / 10;
+
+  const totalLessonsCompleted = allCourses.reduce((sum, c) => sum + c.completedLessonsCount, 0);
+  const totalLessonsAvailable = allCourses.reduce((sum, c) => sum + c.totalLessonsCount, 0);
+
+  const overallCompletionPercent =
+    totalLessonsAvailable > 0
+      ? Math.round((totalLessonsCompleted / totalLessonsAvailable) * 100)
+      : 0;
+
+  return {
+    totalCourses: allCourses.length,
+    completedCount: completedCourses.length,
+    inProgressCount: inProgressCourses.length,
+    pendingCount: pendingCourses.length,
+    totalMinutesLogged,
+    totalHoursLogged,
+    totalLessonsCompleted,
+    totalLessonsAvailable,
+    overallCompletionPercent,
+    completedCourses,
+    inProgressCourses,
+    pendingCourses,
+    allCourses,
+  };
+}
+
+export function markEntireCourseCompleted(
+  tracker: Tracker,
+  completionTimestamp: string = new Date().toISOString()
+): Tracker {
+  return {
+    ...tracker,
+    modules: tracker.modules.map(mod => ({
+      ...mod,
+      lessons: mod.lessons.map(les => ({
+        ...les,
+        completed: true,
+        completedAt: les.completed && les.completedAt ? les.completedAt : completionTimestamp,
+      })),
+    })),
+  };
+}
+
+export function resetCourseToPending(tracker: Tracker): Tracker {
+  return {
+    ...tracker,
+    modules: tracker.modules.map(mod => ({
+      ...mod,
+      lessons: mod.lessons.map(les => ({
+        ...les,
+        completed: false,
+        completedAt: undefined,
+      })),
+    })),
+  };
+}

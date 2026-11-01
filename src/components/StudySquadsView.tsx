@@ -234,7 +234,7 @@ export const StudySquadsView: React.FC<StudySquadsViewProps> = ({
               <thead>
                 <tr className="border-b border-slate-100 text-slate-400 uppercase font-mono">
                   <th className="py-2.5 pl-2 font-medium">Rank</th>
-                  <th className="py-2.5 font-medium">Student</th>
+                  <th className="py-2.5 font-medium">Learner / Role</th>
                   <th className="py-2.5 font-medium">Current Streak</th>
                   <th className="py-2.5 font-medium text-right">Weekly Time</th>
                   <th className="py-2.5 font-medium text-center">Today</th>

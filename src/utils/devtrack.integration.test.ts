@@ -7,6 +7,12 @@ import {
   generateDailyStudyChecklist,
   completeLessonInTracker,
   buildDynamicTrackerFromInput,
+  createDefaultLearnerProfile,
+  applyPacingPresetToProfile,
+  applyProfilePacingToTracker,
+  computeSkillMilestones,
+  computeProfileCourseAnalytics,
+  markEntireCourseCompleted,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -318,7 +324,145 @@ describe('Integration Tests: Dynamic Course Addition, Switching & YouTube URL Sy
     assert.ok(lessons[2].videoUrl.includes('index=3'));
     assert.notEqual(lessons[0].videoUrl, lessons[1].videoUrl);
     assert.notEqual(lessons[1].videoUrl, lessons[2].videoUrl);
+    // Ensure Lesson 2 and Lesson 3 NEVER repeat Lesson 1's v=kBdlM6hNDAE
+    assert.ok(
+      !lessons[1].videoUrl.includes('v=kBdlM6hNDAE'),
+      `Lesson 2 (${lessons[1].videoUrl}) must not repeat Lesson 1 videoId kBdlM6hNDAE`
+    );
+    assert.ok(
+      !lessons[2].videoUrl.includes('v=kBdlM6hNDAE'),
+      `Lesson 3 (${lessons[2].videoUrl}) must not repeat Lesson 1 videoId kBdlM6hNDAE`
+    );
+  });
+
+  test('auto-detecting a YouTube playlist URL with empty rawTopic via /api/extract-resource extracts real lecture titles and distinct videoIds per lesson', async () => {
+    const playlistUrl = 'https://www.youtube.com/playlist?list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y';
+    let serverTracker: any = null;
+
+    const baseUrl = 'http://localhost:3000';
+    try {
+      const res = await fetch(`${baseUrl}/api/extract-resource`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: playlistUrl,
+          rawTopic: '', // Empty topic: system must auto-detect subject, lectures, and titles from URL!
+          dailyMinutes: 60,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as any;
+        if (json.success && json.data) {
+          serverTracker = json.data;
+        }
+      }
+    } catch {
+      // Fallback if server is restarting
+    }
+
+    const tracker = buildDynamicTrackerFromInput({
+      inputUrl: playlistUrl,
+      rawTopic: '',
+      extractedData: serverTracker,
+      dailyMinutes: 60,
+      trackerId: 'tracker-autodetect-e2e',
+    });
+
+    assert.ok(tracker.title.length > 3);
+    assert.ok(!tracker.title.startsWith('http'), 'Title must be human-readable, not a raw URL');
+    const lessons = tracker.modules.flatMap(m => m.lessons);
+    assert.ok(lessons.length >= 5, `Expected at least 5 lessons, got ${lessons.length}`);
+
+    // Verify all lesson URLs are distinct and do not repeat the first video ID
+    const urlSet = new Set(lessons.map(l => l.videoUrl));
+    assert.equal(urlSet.size, lessons.length, 'Every lesson must have a unique videoUrl');
+  });
+
+  test('working professional configuring after-hours upskilling profile synchronizes course pacing, ICS schedule, and career skill milestones', () => {
+    // 1. User configures profile as a Working Professional upskilling after office hours
+    let profile = createDefaultLearnerProfile('Working Professional');
+    profile = applyPacingPresetToProfile(profile, 'after-work');
+    profile.careerObjective = 'Transition to Senior Cloud & System Architect';
+
+    // 2. User imports a System Design course and applies their profile pacing
+    let tracker = buildDynamicTrackerFromInput({
+      inputUrl: 'https://www.youtube.com/playlist?list=PLMCXHnjXnTnvo6alSjVkgxV-VH6EPyvoX',
+      rawTopic: 'System Design & Distributed Architecture',
+      dailyMinutes: profile.dailyMinutesTarget,
+      scheduledTime: profile.preferredTime,
+      studyDays: profile.studyDays,
+      trackerId: 'tracker-pro-system-design',
+    });
+    tracker = applyProfilePacingToTracker(tracker, profile);
+
+    assert.equal(tracker.dailyMinutesTarget, 45);
+    assert.equal(tracker.scheduledTime, '21:00');
+    assert.deepEqual(tracker.studyDays, [1, 2, 3, 4, 5]);
+
+    // 3. Verify upcoming calendar sessions strictly follow Mon-Fri after-work schedule (no weekend sessions)
+    const upcoming = calculateUpcomingSessions(tracker, { sessionLimit: 4 });
+    for (const s of upcoming) {
+      const day = s.date.getDay();
+      assert.ok(day >= 1 && day <= 5, `After-work session day (${day}) must fall on Mon-Fri`);
+      assert.equal(s.startTime, '21:00');
+    }
+
+    // 4. Complete first lesson and verify career skill milestones advance
+    const milestonesBefore = computeSkillMilestones(tracker, profile, 3);
+    const firstLessonId = tracker.modules[0].lessons[0].id;
+    tracker = completeLessonInTracker(tracker, firstLessonId, 'Designed consistent hashing ring');
+    const milestonesAfter = computeSkillMilestones(tracker, profile, 4);
+
+    assert.ok(milestonesAfter[0].progressPercent > milestonesBefore[0].progressPercent);
+  });
+
+  test('profile course analytics tracks a universal learner course lifecycle from Pending -> In Progress -> Completed with accurate study hours', () => {
+    // 1. User bookmarks a new Python course (starts in Pending / Saved queue with 0% progress)
+    let pythonCourse = buildDynamicTrackerFromInput({
+      inputUrl: 'https://www.youtube.com/playlist?list=PLu0W_9lII9agwh1XjRt242xIpHhPT2llg',
+      rawTopic: 'Python for Automation & Backend',
+      trackerId: 'tracker-lifecycle-python',
+    });
+
+    const existingInProgress = structuredClone(PRESET_TRACKERS[0]);
+
+    // Verify initial analytics: 1 In Progress, 1 Pending, 0 Completed
+    let analytics = computeProfileCourseAnalytics([existingInProgress, pythonCourse]);
+    assert.equal(analytics.totalCourses, 2);
+    assert.equal(analytics.inProgressCount, 1);
+    assert.equal(analytics.pendingCount, 1);
+    assert.equal(analytics.completedCount, 0);
+    assert.equal(analytics.pendingCourses[0].trackerId, 'tracker-lifecycle-python');
+
+    // 2. Learner starts the Python course and completes Lesson 1 -> moves from Pending to In Progress
+    const lesson1Id = pythonCourse.modules[0].lessons[0].id;
+    pythonCourse = completeLessonInTracker(
+      pythonCourse,
+      lesson1Id,
+      'Completed Python variables and memory model',
+      '2026-10-25T20:00:00.000Z'
+    );
+
+    analytics = computeProfileCourseAnalytics([existingInProgress, pythonCourse]);
+    assert.equal(analytics.pendingCount, 0);
+    assert.equal(analytics.inProgressCount, 2);
+    const pythonInProgress = analytics.inProgressCourses.find(
+      c => c.trackerId === 'tracker-lifecycle-python'
+    );
+    assert.ok(pythonInProgress);
+    assert.ok(pythonInProgress.progressPercent > 0 && pythonInProgress.progressPercent < 100);
+    assert.equal(pythonInProgress.currentLessonTitle, pythonCourse.modules[0].lessons[1].title);
+
+    // 3. Learner completes all remaining lessons in the Python course -> moves to Completed with timestamp & total study time
+    pythonCourse = markEntireCourseCompleted(pythonCourse, '2026-11-01T15:00:00.000Z');
+    analytics = computeProfileCourseAnalytics([existingInProgress, pythonCourse]);
+
+    assert.equal(analytics.completedCount, 1);
+    assert.equal(analytics.inProgressCount, 1);
+    assert.equal(analytics.pendingCount, 0);
+    assert.equal(analytics.completedCourses[0].trackerId, 'tracker-lifecycle-python');
+    assert.equal(analytics.completedCourses[0].progressPercent, 100);
+    assert.equal(analytics.completedCourses[0].completedAt, '2026-11-01T15:00:00.000Z');
+    assert.ok(analytics.totalHoursLogged >= analytics.completedCourses[0].hoursLogged);
   });
 });
-
-

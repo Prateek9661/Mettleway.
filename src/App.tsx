@@ -6,7 +6,8 @@ import { AIMentorView } from './components/AIMentorView';
 import { StudySquadsView } from './components/StudySquadsView';
 import { ScheduleAlertsView } from './components/ScheduleAlertsView';
 import { CreateTrackerModal } from './components/CreateTrackerModal';
-import { Tracker, StudySquad } from './types';
+import { LearnerProfileModal } from './components/LearnerProfileModal';
+import { Tracker, StudySquad, LearnerProfile } from './types';
 import { PRESET_TRACKERS, INITIAL_SQUADS } from './utils/mockPresets';
 import { soundAlert } from './utils/audioAlert';
 import {
@@ -16,8 +17,12 @@ import {
   sanitizeAndSyncTracker,
   getCurrentUncompletedLesson,
   getCourseThemeTokens,
+  createDefaultLearnerProfile,
+  applyProfilePacingToTracker,
+  markEntireCourseCompleted,
+  resetCourseToPending,
 } from './utils/studyWorkspaceLogic';
-import { Bell, Play, X, Flame, Volume2, VolumeX, BookOpen, Clock, CheckCircle2 } from 'lucide-react';
+import { Bell, Play, X, Flame, Volume2, VolumeX, BookOpen, Clock, CheckCircle2, Briefcase } from 'lucide-react';
 
 export default function App() {
   // Navigation tab state
@@ -30,7 +35,10 @@ export default function App() {
       if (saved) {
         const parsed: Tracker[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(t => sanitizeAndSyncTracker(t));
+          const sanitizedList = parsed.map(t => sanitizeAndSyncTracker(t));
+          const existingIds = new Set(sanitizedList.map(t => t.id));
+          const missingPresets = PRESET_TRACKERS.filter(p => !existingIds.has(p.id));
+          return [...sanitizedList, ...missingPresets];
         }
       }
     } catch (e) {
@@ -74,6 +82,22 @@ export default function App() {
 
   // Create Modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+
+  // Universal Learner Profile & Goal Pacing state
+  const [learnerProfile, setLearnerProfile] = useState<LearnerProfile>(() => {
+    try {
+      const saved = localStorage.getItem('devtrack_learner_profile');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.role && parsed.pacingMode) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return createDefaultLearnerProfile('Software Engineer');
+  });
+
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
 
   // Deep Work distraction-free mode state
   const [isDeepWork, setIsDeepWork] = useState<boolean>(false);
@@ -123,6 +147,13 @@ export default function App() {
     } catch {}
   }, [streakDays]);
 
+  // Persist learner profile
+  useEffect(() => {
+    try {
+      localStorage.setItem('devtrack_learner_profile', JSON.stringify(learnerProfile));
+    } catch {}
+  }, [learnerProfile]);
+
   const activeTracker = React.useMemo(() => {
     const found = trackers.find(t => t.id === activeTrackerId) || trackers[0] || null;
     return found ? sanitizeAndSyncTracker(found) : null;
@@ -133,7 +164,7 @@ export default function App() {
     [activeTracker?.category]
   );
 
-  // Synchronize dependent state whenever active course or course URL changes
+  // Synchronize dependent state whenever active course, course URL, or learner profile changes
   useEffect(() => {
     if (!activeTracker) return;
     const nextUncompleted = getCurrentUncompletedLesson(activeTracker);
@@ -144,13 +175,39 @@ export default function App() {
           m.isCurrentUser
             ? {
                 ...m,
+                name: `${learnerProfile.name || 'You'} (${learnerProfile.role})`,
                 currentLesson: nextUncompleted?.title || `${activeTracker.title} (Completed)`,
               }
             : m
         ),
       }))
     );
-  }, [activeTracker?.id, activeTracker?.sourceUrl, activeTracker?.title]);
+  }, [activeTracker?.id, activeTracker?.sourceUrl, activeTracker?.title, learnerProfile.name, learnerProfile.role]);
+
+  // Save learner profile and optionally sync schedule/pacing to active course
+  const handleSaveProfile = (updatedProfile: LearnerProfile, syncToActiveCourse: boolean) => {
+    setLearnerProfile(updatedProfile);
+    if (syncToActiveCourse && activeTrackerId) {
+      setTrackers(prev =>
+        prev.map(t => (t.id === activeTrackerId ? applyProfilePacingToTracker(t, updatedProfile) : t))
+      );
+    }
+  };
+
+  // Mark an entire course as 100% completed from Profile Course Analytics
+  const handleMarkCourseCompleted = (trackerId: string) => {
+    soundAlert.playCompletionChime();
+    setTrackers(prev =>
+      prev.map(t => (t.id === trackerId ? markEntireCourseCompleted(t) : t))
+    );
+  };
+
+  // Reset a course back to Pending / Saved (0% progress)
+  const handleResetCourseToPending = (trackerId: string) => {
+    setTrackers(prev =>
+      prev.map(t => (t.id === trackerId ? resetCourseToPending(t) : t))
+    );
+  };
 
   // Compute overall active course progress
   const courseStats = React.useMemo(
@@ -319,7 +376,7 @@ export default function App() {
       const newSquad: StudySquad = {
         id: `squad-${Date.now()}`,
         name: `Cohort ${code}`,
-        trackName: activeTracker?.title || 'Computer Science Mastery',
+        trackName: activeTracker?.title || 'Engineering & Career Upskilling',
         description: `Custom study cohort joined with code ${code}`,
         inviteCode: code,
         squadGoal: 'Master core concepts and keep daily streak alive',
@@ -327,7 +384,7 @@ export default function App() {
         members: [
           {
             id: 'member-user',
-            name: 'You (Student)',
+            name: `${learnerProfile.name || 'You'} (${learnerProfile.role})`,
             avatarUrl: '/src/assets/images/avatar_student_alex_1793187697984.jpg',
             streakDays: streakDays,
             weeklyMinutes: 180,
@@ -348,7 +405,7 @@ export default function App() {
     const newSquad: StudySquad = {
       id: `squad-${Date.now()}`,
       name,
-      trackName: track || activeTracker?.title || 'Computer Science',
+      trackName: track || activeTracker?.title || 'Continuous Upskilling',
       description: `Active study squad created by you for peer accountability.`,
       inviteCode: `DEV-${Math.floor(1000 + Math.random() * 9000)}`,
       squadGoal: goal || 'Finish all scheduled lessons on time',
@@ -356,7 +413,7 @@ export default function App() {
       members: [
         {
           id: 'member-user',
-          name: 'You (Student)',
+          name: `${learnerProfile.name || 'You'} (${learnerProfile.role})`,
           avatarUrl: '/src/assets/images/avatar_student_alex_1793187697984.jpg',
           streakDays: streakDays,
           weeklyMinutes: 120,
@@ -444,8 +501,23 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Learner Status: Daily Time, Streak & Sound Toggle */}
+            {/* Right Learner Status: Role & Goals, Daily Time, Streak & Sound Toggle */}
             <div className="flex items-center gap-4 text-slate-600 ml-auto">
+              <button
+                type="button"
+                onClick={() => setIsProfileModalOpen(true)}
+                className="flex items-center gap-1.5 text-slate-700 hover:text-indigo-600 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                title="Open Learner Profile, Course History & Goal Pacing Dashboard"
+              >
+                <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
+                <span>{learnerProfile.role}</span>
+                <span className="text-indigo-600 underline underline-offset-2 font-medium hidden md:inline">
+                  (Profile &amp; Courses)
+                </span>
+              </button>
+
+              <span aria-hidden="true" className="text-slate-300">·</span>
+
               <button
                 type="button"
                 onClick={() => setActiveTab('schedule')}
@@ -498,6 +570,9 @@ export default function App() {
             onOpenCreateModal={() => setIsCreateModalOpen(true)}
             isDeepWork={isDeepWork}
             onToggleDeepWork={handleToggleDeepWork}
+            learnerProfile={learnerProfile}
+            onOpenProfileModal={() => setIsProfileModalOpen(true)}
+            allTrackers={trackers}
           />
         )}
 
@@ -541,6 +616,23 @@ export default function App() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSaveTracker={handleSaveTracker}
+      />
+
+      {/* Universal Learner Profile, Course Tracking & Flexible Goal Pacing Modal */}
+      <LearnerProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        profile={learnerProfile}
+        onSaveProfile={handleSaveProfile}
+        trackers={trackers}
+        activeTrackerId={activeTrackerId}
+        onSelectTracker={id => {
+          setActiveTrackerId(id);
+          setActiveTab('today');
+        }}
+        onMarkCourseCompleted={handleMarkCourseCompleted}
+        onResetCourseToPending={handleResetCourseToPending}
+        onOpenCreateCourse={() => setIsCreateModalOpen(true)}
       />
     </div>
   );

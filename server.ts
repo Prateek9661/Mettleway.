@@ -61,9 +61,35 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallbackMessage: string
   });
 }
 
+function decodeHtmlEntities(str: string): string {
+  return (str || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function parseLengthTextToMinutes(lengthText?: string): number {
+  if (!lengthText) return 35;
+  const parts = String(lengthText)
+    .trim()
+    .split(':')
+    .map(n => parseInt(n, 10))
+    .filter(n => Number.isFinite(n));
+  if (parts.length === 3) {
+    return Math.max(10, parts[0] * 60 + parts[1] + Math.round(parts[2] / 60));
+  }
+  if (parts.length === 2) {
+    return Math.max(10, parts[0] + Math.round(parts[1] / 60));
+  }
+  return 35;
+}
+
 /**
- * Scrapes YouTube playlist or watch page metadata & video list (ytInitialData + oEmbed)
- * when a user provides a playlist URL or the first video link of a playlist.
+ * Scrapes YouTube playlist or watch page metadata & sequential video list
+ * using YouTube's official XML feed (feeds/videos.xml?playlist_id=...) + watch page playlistPanelVideoRenderer
+ * + oEmbed when a user provides a playlist URL or the first video link of a playlist.
  */
 async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
   title: string;
@@ -79,7 +105,7 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
     return { title, instructor, playlistVideos };
   }
 
-  // 1. Try oEmbed first for fast title & author_name
+  // 1. Try oEmbed first for fast video/playlist title & author_name
   try {
     const targetForOembed = parsed.videoId
       ? `https://www.youtube.com/watch?v=${parsed.videoId}`
@@ -95,12 +121,53 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
     // Ignore oEmbed failure
   }
 
-  // 2. If playlistId is present, fetch the playlist page to extract sequential playlist videos
-  if (parsed.playlistId) {
+  let effectivePlaylistId = parsed.playlistId;
+
+  // 2. If playlistId is present, fetch YouTube's official public XML feed first (ultra-fast & reliable)
+  const xmlVideos: ScrapedPlaylistVideoItem[] = [];
+  if (effectivePlaylistId) {
     try {
-      const playlistPageUrl = `https://www.youtube.com/playlist?list=${encodeURIComponent(parsed.playlistId)}`;
+      const feedUrl = `https://www.youtube.com/feeds/videos.xml?playlist_id=${encodeURIComponent(effectivePlaylistId)}`;
+      const feedRes = await withTimeout(fetch(feedUrl), 2200, 'Playlist XML feed timeout');
+      if (feedRes.ok) {
+        const xml = await feedRes.text();
+        // Extract playlist level <title> and <author><name> before the first <entry>
+        const headerPart = xml.split('<entry>')[0] || '';
+        const plTitleMatch = headerPart.match(/<title>([\s\S]*?)<\/title>/);
+        const plAuthorMatch = headerPart.match(/<author>\s*<name>([\s\S]*?)<\/name>/);
+        if (plTitleMatch?.[1]) {
+          title = decodeHtmlEntities(plTitleMatch[1].trim());
+        }
+        if (plAuthorMatch?.[1]) {
+          instructor = decodeHtmlEntities(plAuthorMatch[1].trim());
+        }
+
+        const entryRegex = /<entry>[\s\S]*?<yt:videoId>([^<]+)<\/yt:videoId>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<\/entry>/g;
+        let m: RegExpExecArray | null;
+        while ((m = entryRegex.exec(xml)) !== null && xmlVideos.length < 15) {
+          const vid = m[1].trim();
+          const vidTitle = decodeHtmlEntities(m[2].trim());
+          if (vid && vidTitle) {
+            xmlVideos.push({
+              videoId: vid,
+              title: vidTitle,
+              durationMinutes: 35,
+            });
+          }
+        }
+      }
+    } catch {
+      // Ignore XML feed error and continue to watch-page scrape
+    }
+  }
+
+  // 3. Fetch the watch page with ?v=FIRST_VID&list=PLAYLIST_ID to extract playlistPanelVideoRenderer (includes exact durations and up to 16 sequential videos)
+  const seedVideoId = parsed.videoId || xmlVideos[0]?.videoId;
+  if (effectivePlaylistId && seedVideoId) {
+    try {
+      const watchPlaylistUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(seedVideoId)}&list=${encodeURIComponent(effectivePlaylistId)}`;
       const pageRes = await withTimeout(
-        fetch(playlistPageUrl, {
+        fetch(watchPlaylistUrl, {
           headers: {
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -108,62 +175,56 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
           },
         }),
         2800,
-        'Playlist scrape timeout'
+        'Watch playlist scrape timeout'
       );
 
       if (pageRes.ok) {
         const html = await pageRes.text();
-        const match = html.match(/var\s+ytInitialData\s*=\s*(\{[\s\S]*?\});\s*<\/script>/);
-        if (match?.[1]) {
-          const ytData = JSON.parse(match[1]);
-          const playlistTitle =
-            ytData?.metadata?.playlistMetadataRenderer?.title ||
-            ytData?.header?.playlistHeaderRenderer?.title?.simpleText;
-          if (playlistTitle && typeof playlistTitle === 'string') {
-            title = playlistTitle.trim();
-          }
+        const marker = 'var ytInitialData = ';
+        const startIdx = html.indexOf(marker);
+        if (startIdx !== -1) {
+          const endIdx = html.indexOf(';</script>', startIdx);
+          if (endIdx !== -1) {
+            const jsonStr = html.slice(startIdx + marker.length, endIdx);
+            const ytData = JSON.parse(jsonStr);
 
-          const ownerRuns =
-            ytData?.header?.playlistHeaderRenderer?.ownerText?.runs ||
-            ytData?.sidebar?.playlistSidebarRenderer?.items?.[1]?.playlistSidebarSecondaryInfoRenderer
-              ?.videoOwner?.videoOwnerRenderer?.title?.runs;
-          if (Array.isArray(ownerRuns) && ownerRuns[0]?.text && !instructor) {
-            instructor = String(ownerRuns[0].text).trim();
-          }
-
-          // Walk ytData recursively to collect up to 12 playlistVideoRenderer items
-          const collectVideos = (node: any) => {
-            if (!node || typeof node !== 'object' || playlistVideos.length >= 12) return;
-            if (node.playlistVideoRenderer) {
-              const r = node.playlistVideoRenderer;
-              const vid = r.videoId;
-              const vidTitle =
-                r.title?.runs?.[0]?.text || r.title?.simpleText || '';
-              const lengthSec = parseInt(r.lengthSeconds || '0', 10);
-              const durationMinutes =
-                lengthSec > 0 ? Math.max(10, Math.round(lengthSec / 60)) : 35;
-              if (vid && vidTitle) {
-                playlistVideos.push({
-                  videoId: String(vid),
-                  title: String(vidTitle).trim(),
-                  durationMinutes,
-                });
+            const collectPanelVideos = (node: any) => {
+              if (!node || typeof node !== 'object' || playlistVideos.length >= 15) return;
+              if (node.playlistPanelRenderer?.title && typeof node.playlistPanelRenderer.title === 'string') {
+                title = node.playlistPanelRenderer.title.trim();
               }
-              return;
-            }
-            if (Array.isArray(node)) {
-              for (const item of node) collectVideos(item);
-            } else {
-              for (const k of Object.keys(node)) collectVideos(node[k]);
-            }
-          };
+              if (node.playlistPanelVideoRenderer) {
+                const r = node.playlistPanelVideoRenderer;
+                const vid = r.videoId;
+                const vidTitle = r.title?.simpleText || r.title?.runs?.[0]?.text || '';
+                const lengthStr = r.lengthText?.simpleText || r.lengthText?.runs?.[0]?.text || '';
+                if (vid && vidTitle && !playlistVideos.some(v => v.videoId === String(vid))) {
+                  playlistVideos.push({
+                    videoId: String(vid),
+                    title: String(vidTitle).trim(),
+                    durationMinutes: parseLengthTextToMinutes(lengthStr),
+                  });
+                }
+                return;
+              }
+              if (Array.isArray(node)) {
+                for (const item of node) collectPanelVideos(item);
+              } else {
+                for (const k of Object.keys(node)) collectPanelVideos(node[k]);
+              }
+            };
 
-          collectVideos(ytData?.contents);
+            collectPanelVideos(ytData);
+          }
         }
       }
     } catch {
-      // Proceed with fallback / curated sequential lessons if playlist scrape is blocked
+      // Fall back to xmlVideos if watch page parse fails
     }
+  }
+
+  if (playlistVideos.length === 0 && xmlVideos.length > 0) {
+    playlistVideos.push(...xmlVideos);
   }
 
   return { title, instructor, playlistVideos };
