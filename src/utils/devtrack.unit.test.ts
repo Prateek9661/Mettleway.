@@ -23,6 +23,34 @@ import {
   computeProfileCourseAnalytics,
   markEntireCourseCompleted,
   resetCourseToPending,
+  parseYouTubeSourceUrl,
+  normalizeCourseSeriesTitle,
+  parseYouTubePlaylistXmlFeed,
+  resolveLessonEmbedUrl,
+  getActiveOrSelectedLesson,
+  recordLastWatchedLesson,
+  getPreviousAndNextLesson,
+  getContinueLearningInfoForTracker,
+  getContinueLearningState,
+  formatSecondsToTimestamp,
+  parseTimestampToSeconds,
+  getStructuredNotesForLesson,
+  addVideoNoteToTracker,
+  updateVideoNoteInTracker,
+  deleteVideoNoteFromTracker,
+  toggleBookmarkVideoNoteInTracker,
+  searchAndFilterCourseNotes,
+  exportCourseNotesToMarkdown,
+  exportCourseNotesToJson,
+  categorizeCourseDifficulty,
+  inferCourseTechnologies,
+  toggleTrackerFavorite,
+  toggleTrackerBookmark,
+  filterAndSortTrackers,
+  computeWeeklyLearningActivity,
+  computeStudentDashboardSummary,
+  getUserScopedStorageKey,
+  deleteTrackerFromList,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -756,3 +784,397 @@ describe('Unit Tests: Profile Course Analytics & History Breakdown (TDD)', () =>
     assert.equal(statusAfter.minutesLogged, 0);
   });
 });
+
+describe('Unit Tests: YouTube Playlist Extraction, Series Title Normalization & Dynamic Player Mapping (TDD)', () => {
+  test('parseYouTubeSourceUrl detects playlistId, videoId, startIndex, and timestampSeconds from watch+playlist and single video URLs', () => {
+    const watchWithPlaylist = parseYouTubeSourceUrl(
+      'https://www.youtube.com/watch?v=WQoB2z67hvY&list=PLDzeHZWIZsTryvtXdMr6rPh4IDexB5NIA&index=3&t=120s'
+    );
+    assert.equal(watchWithPlaylist.isYouTube, true);
+    assert.equal(watchWithPlaylist.videoId, 'WQoB2z67hvY');
+    assert.equal(watchWithPlaylist.playlistId, 'PLDzeHZWIZsTryvtXdMr6rPh4IDexB5NIA');
+    assert.equal(watchWithPlaylist.startIndex, 3);
+    assert.equal(watchWithPlaylist.timestampSeconds, 120);
+    assert.equal(watchWithPlaylist.isPlaylistOrSeries, true);
+
+    const singleVideoWithTimestamp = parseYouTubeSourceUrl(
+      'https://youtu.be/_uQrJ0TkZlc?t=30m'
+    );
+    assert.equal(singleVideoWithTimestamp.isYouTube, true);
+    assert.equal(singleVideoWithTimestamp.videoId, '_uQrJ0TkZlc');
+    assert.equal(singleVideoWithTimestamp.playlistId, null);
+    assert.equal(singleVideoWithTimestamp.timestampSeconds, 1800);
+  });
+
+  test('normalizeCourseSeriesTitle strips single-lecture prefixes so pasting Video 1 of a playlist sets the overall series title', () => {
+    assert.equal(
+      normalizeCourseSeriesTitle('Lecture 1: Introduction to C++ | Complete C++ Placement DSA Course'),
+      'Complete C++ Placement DSA Course'
+    );
+    assert.equal(
+      normalizeCourseSeriesTitle('Lesson 01: Docker & Containers Fundamentals'),
+      'Docker & Containers Fundamentals'
+    );
+    assert.equal(
+      normalizeCourseSeriesTitle('#1 Python Tutorial for Beginners — Variables & Memory'),
+      'Python Tutorial for Beginners — Variables & Memory'
+    );
+  });
+
+  test('parseYouTubePlaylistXmlFeed extracts playlist title, author, and sequential video items from YouTube XML feed', () => {
+    const sampleXml = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <title>System Design &amp; Microservices Playlist</title>
+  <author><name>ByteByteGo</name></author>
+  <entry>
+    <yt:videoId>vid_lec_1</yt:videoId>
+    <title>Load Balancing &amp; Reverse Proxies</title>
+  </entry>
+  <entry>
+    <yt:videoId>vid_lec_2</yt:videoId>
+    <title>Consistent Hashing Deep Dive</title>
+  </entry>
+  <entry>
+    <yt:videoId>vid_lec_3</yt:videoId>
+    <title>Distributed Caching &amp; Redis Internals</title>
+  </entry>
+</feed>`;
+
+    const parsed = parseYouTubePlaylistXmlFeed(sampleXml);
+    assert.equal(parsed.playlistTitle, 'System Design & Microservices Playlist');
+    assert.equal(parsed.playlistAuthor, 'ByteByteGo');
+    assert.equal(parsed.videos.length, 3);
+    assert.equal(parsed.videos[0].videoId, 'vid_lec_1');
+    assert.equal(parsed.videos[1].videoId, 'vid_lec_2');
+    assert.equal(parsed.videos[2].videoId, 'vid_lec_3');
+  });
+
+  test('resolveLessonEmbedUrl maps Lesson 1, Lesson 2, Lesson 3 to distinct embed URLs and NEVER defaults Lesson 2+ back to Lesson 1 video', () => {
+    const playlistCourseUrl =
+      'https://www.youtube.com/watch?v=FIRST_VID_ID&list=PL_TEST_PLAYLIST_999';
+
+    // Case A: When individual videoIds were scraped for each lecture
+    const embed1 = resolveLessonEmbedUrl(
+      playlistCourseUrl,
+      'https://www.youtube.com/watch?v=FIRST_VID_ID&list=PL_TEST_PLAYLIST_999&index=1',
+      0
+    );
+    const embed2 = resolveLessonEmbedUrl(
+      playlistCourseUrl,
+      'https://www.youtube.com/watch?v=SECOND_VID_ID&list=PL_TEST_PLAYLIST_999&index=2',
+      1
+    );
+    const embed3 = resolveLessonEmbedUrl(
+      playlistCourseUrl,
+      'https://www.youtube.com/watch?v=THIRD_VID_ID&list=PL_TEST_PLAYLIST_999&index=3',
+      2
+    );
+
+    assert.ok(embed1.includes('/embed/FIRST_VID_ID'));
+    assert.ok(embed2.includes('/embed/SECOND_VID_ID'));
+    assert.ok(embed3.includes('/embed/THIRD_VID_ID'));
+    assert.notEqual(embed1, embed2);
+    assert.notEqual(embed2, embed3);
+
+    // Case B: When only the playlist ID is known for Lesson 2 and Lesson 3, uses videoseries?list=...&index=N (never FIRST_VID_ID)
+    const fallbackEmbed2 = resolveLessonEmbedUrl(
+      playlistCourseUrl,
+      'https://www.youtube.com/playlist?list=PL_TEST_PLAYLIST_999&index=2',
+      1
+    );
+    const fallbackEmbed3 = resolveLessonEmbedUrl(
+      playlistCourseUrl,
+      'https://www.youtube.com/playlist?list=PL_TEST_PLAYLIST_999&index=3',
+      2
+    );
+    assert.ok(
+      !fallbackEmbed2.includes('FIRST_VID_ID'),
+      `Lesson 2 embed (${fallbackEmbed2}) must not default back to FIRST_VID_ID`
+    );
+    assert.ok(fallbackEmbed2.includes('list=PL_TEST_PLAYLIST_999'));
+    assert.ok(fallbackEmbed2.includes('index=1'));
+    assert.ok(fallbackEmbed3.includes('index=2'));
+
+    // Case C: Single long-form course video maps Lesson 1, Lesson 2, Lesson 3 to sequential chapter start timestamps
+    const singleCourseUrl = 'https://www.youtube.com/watch?v=SINGLE_LONG_VID';
+    const singleEmbed1 = resolveLessonEmbedUrl(singleCourseUrl, singleCourseUrl, 0);
+    const singleEmbed2 = resolveLessonEmbedUrl(
+      singleCourseUrl,
+      'https://www.youtube.com/watch?v=SINGLE_LONG_VID&t=1800s',
+      1
+    );
+    const singleEmbed3 = resolveLessonEmbedUrl(
+      singleCourseUrl,
+      'https://www.youtube.com/watch?v=SINGLE_LONG_VID&t=3600s',
+      2
+    );
+    assert.ok(singleEmbed1.includes('/embed/SINGLE_LONG_VID'));
+    assert.ok(singleEmbed2.includes('start=1800'));
+    assert.ok(singleEmbed3.includes('start=3600'));
+  });
+
+  test('getActiveOrSelectedLesson dynamically switches to any clicked Lesson X in the roadmap or playlist queue', () => {
+    const tracker = buildDynamicTrackerFromInput({
+      inputUrl: 'https://www.youtube.com/watch?v=kBdlM6hNDAE&list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y',
+      rawTopic: 'DBMS',
+      trackerId: 'tracker-select-lesson-test',
+    });
+
+    const allLessons = tracker.modules.flatMap(m => m.lessons);
+    assert.ok(allLessons.length >= 6);
+
+    // By default (no selectedLessonId), returns Lesson 1 (index 0)
+    const defaultActive = getActiveOrSelectedLesson(tracker, null);
+    assert.equal(defaultActive.lessonIndex, 0);
+    assert.equal(defaultActive.lesson?.id, allLessons[0].id);
+
+    // Clicking Lesson 4 (index 3) dynamically resolves Lesson 4 and its exact index
+    const selectedFourth = getActiveOrSelectedLesson(tracker, allLessons[3].id);
+    assert.equal(selectedFourth.lessonIndex, 3);
+    assert.equal(selectedFourth.lesson?.id, allLessons[3].id);
+    assert.equal(selectedFourth.lesson?.title, allLessons[3].title);
+  });
+});
+
+describe('Unit Tests: LMS Phase — Smart Learning Progress, Continue Learning & Prev/Next Navigation (TDD)', () => {
+  test('recordLastWatchedLesson remembers lastWatchedLessonId and updates lastAccessedAt timestamp', () => {
+    const tracker = structuredClone(PRESET_TRACKERS[0]);
+    const allLessons = tracker.modules.flatMap(m => m.lessons);
+    const targetLesson = allLessons[3];
+
+    const updated = recordLastWatchedLesson(tracker, targetLesson.id, '2026-11-04T10:00:00.000Z');
+    assert.equal(updated.lastWatchedLessonId, targetLesson.id);
+    assert.equal(updated.lastAccessedAt, '2026-11-04T10:00:00.000Z');
+  });
+
+  test('getPreviousAndNextLesson computes previous, next, and total lesson navigation accurately', () => {
+    const tracker = structuredClone(PRESET_TRACKERS[0]);
+    const allLessons = tracker.modules.flatMap(m => m.lessons);
+
+    const firstNav = getPreviousAndNextLesson(tracker, allLessons[0].id);
+    assert.equal(firstNav.currentIndex, 0);
+    assert.equal(firstNav.previousLesson, null);
+    assert.equal(firstNav.nextLesson?.id, allLessons[1].id);
+    assert.equal(firstNav.totalCount, allLessons.length);
+
+    const middleNav = getPreviousAndNextLesson(tracker, allLessons[2].id);
+    assert.equal(middleNav.currentIndex, 2);
+    assert.equal(middleNav.previousLesson?.id, allLessons[1].id);
+    assert.equal(middleNav.nextLesson?.id, allLessons[3].id);
+
+    const lastIdx = allLessons.length - 1;
+    const lastNav = getPreviousAndNextLesson(tracker, allLessons[lastIdx].id);
+    assert.equal(lastNav.currentIndex, lastIdx);
+    assert.equal(lastNav.previousLesson?.id, allLessons[lastIdx - 1].id);
+    assert.equal(lastNav.nextLesson, null);
+  });
+
+  test('getContinueLearningInfoForTracker and getContinueLearningState prioritize remembered lastWatchedLessonId across courses', () => {
+    const trackerA = recordLastWatchedLesson(
+      structuredClone(PRESET_TRACKERS[0]),
+      PRESET_TRACKERS[0].modules[0].lessons[2].id,
+      '2026-11-04T09:00:00.000Z'
+    );
+    const trackerB = recordLastWatchedLesson(
+      structuredClone(PRESET_TRACKERS[1]),
+      PRESET_TRACKERS[1].modules[0].lessons[1].id,
+      '2026-11-04T11:30:00.000Z'
+    );
+
+    const infoA = getContinueLearningInfoForTracker(trackerA);
+    assert.ok(infoA);
+    assert.equal(infoA.lessonId, PRESET_TRACKERS[0].modules[0].lessons[2].id);
+    assert.equal(infoA.lessonIndex, 2);
+
+    // Global Continue Learning picks trackerB because it was accessed more recently
+    const globalContinue = getContinueLearningState([trackerA, trackerB], trackerA.id);
+    assert.ok(globalContinue.primaryContinue);
+    assert.equal(globalContinue.primaryContinue.trackerId, trackerB.id);
+    assert.equal(globalContinue.primaryContinue.lessonId, PRESET_TRACKERS[1].modules[0].lessons[1].id);
+  });
+});
+
+describe('Unit Tests: LMS Phase — Personal Timestamped Video Notes, Bookmarks, Search & Export (TDD)', () => {
+  test('formatSecondsToTimestamp and parseTimestampToSeconds convert MM:SS and HH:MM:SS reliably', () => {
+    assert.equal(formatSecondsToTimestamp(0), '00:00');
+    assert.equal(formatSecondsToTimestamp(125), '02:05');
+    assert.equal(formatSecondsToTimestamp(3725), '01:02:05');
+
+    assert.equal(parseTimestampToSeconds('02:05'), 125);
+    assert.equal(parseTimestampToSeconds('01:02:05'), 3725);
+    assert.equal(parseTimestampToSeconds('90'), 90);
+  });
+
+  test('addVideoNoteToTracker, updateVideoNoteInTracker, toggleBookmarkVideoNoteInTracker, and deleteVideoNoteFromTracker manage structured notes cleanly', () => {
+    let tracker = structuredClone(PRESET_TRACKERS[0]);
+    const lessonId = tracker.modules[0].lessons[2].id;
+
+    // 1. Create a timestamped note with conceptTag and bookmark
+    tracker = addVideoNoteToTracker(tracker, {
+      lessonId,
+      noteId: 'note-test-1',
+      content: 'Unordered map lookup is O(1) average and O(N) worst case on hash collisions.',
+      timestampInput: '04:20',
+      conceptTag: 'Hash Collisions',
+      isBookmarked: false,
+      nowIso: '2026-11-04T12:00:00.000Z',
+    });
+
+    const lessonAfterAdd = tracker.modules[0].lessons.find(l => l.id === lessonId)!;
+    const notesAfterAdd = getStructuredNotesForLesson(lessonAfterAdd, tracker.id);
+    assert.equal(notesAfterAdd.length, 1);
+    assert.equal(notesAfterAdd[0].id, 'note-test-1');
+    assert.equal(notesAfterAdd[0].timestampSeconds, 260);
+    assert.equal(notesAfterAdd[0].formattedTimestamp, '04:20');
+    assert.equal(notesAfterAdd[0].conceptTag, 'Hash Collisions');
+    assert.equal(notesAfterAdd[0].isBookmarked, false);
+
+    // 2. Toggle bookmark on the note
+    tracker = toggleBookmarkVideoNoteInTracker(tracker, lessonId, 'note-test-1');
+    const notesAfterBookmark = getStructuredNotesForLesson(
+      tracker.modules[0].lessons.find(l => l.id === lessonId)!,
+      tracker.id
+    );
+    assert.equal(notesAfterBookmark[0].isBookmarked, true);
+
+    // 3. Edit the note content and timestamp
+    tracker = updateVideoNoteInTracker(tracker, {
+      lessonId,
+      noteId: 'note-test-1',
+      content: 'Updated: Use custom splitmix64 hash in C++ to prevent anti-hash tests.',
+      timestampInput: '06:15',
+    });
+    const notesAfterUpdate = getStructuredNotesForLesson(
+      tracker.modules[0].lessons.find(l => l.id === lessonId)!,
+      tracker.id
+    );
+    assert.equal(notesAfterUpdate[0].formattedTimestamp, '06:15');
+    assert.equal(notesAfterUpdate[0].timestampSeconds, 375);
+    assert.ok(notesAfterUpdate[0].content.includes('splitmix64'));
+
+    // 4. Search & filter notes across the course
+    const bookmarkedHits = searchAndFilterCourseNotes(tracker, {
+      searchQuery: 'splitmix64',
+      onlyBookmarked: true,
+    });
+    assert.equal(bookmarkedHits.length, 1);
+    assert.equal(bookmarkedHits[0].id, 'note-test-1');
+
+    // 5. Export notes to Markdown and JSON
+    const mdExport = exportCourseNotesToMarkdown(tracker);
+    assert.ok(mdExport.includes('# Study Notes:'));
+    assert.ok(mdExport.includes('[06:15]'));
+    assert.ok(mdExport.includes('splitmix64'));
+
+    const jsonExport = exportCourseNotesToJson(tracker);
+    const parsedJson = JSON.parse(jsonExport);
+    assert.equal(parsedJson.courseId, tracker.id);
+    assert.equal(parsedJson.totalNotes, notesAfterUpdate.length + 2);
+
+    // 6. Delete note
+    tracker = deleteVideoNoteFromTracker(tracker, lessonId, 'note-test-1');
+    const notesAfterDelete = getStructuredNotesForLesson(
+      tracker.modules[0].lessons.find(l => l.id === lessonId)!,
+      tracker.id
+    );
+    assert.equal(notesAfterDelete.length, 0);
+  });
+
+  test('resolveLessonEmbedUrl supports seekTimestampSeconds when clicking a timestamped video note', () => {
+    const embedUrl = resolveLessonEmbedUrl(
+      'https://www.youtube.com/playlist?list=PL_TEST',
+      'https://www.youtube.com/watch?v=kBdlM6hNDAE&list=PL_TEST&index=1',
+      0,
+      260
+    );
+    assert.ok(embedUrl.includes('/embed/kBdlM6hNDAE'));
+    assert.ok(embedUrl.includes('start=260'));
+  });
+});
+
+describe('Unit Tests: LMS Phase — Advanced Course Library Filtering, Sorting, Favorites & Bookmarks (TDD)', () => {
+  test('categorizeCourseDifficulty and inferCourseTechnologies classify courses accurately', () => {
+    const dsaTracker = PRESET_TRACKERS[0];
+    assert.ok(['Beginner', 'Intermediate', 'Advanced'].includes(categorizeCourseDifficulty(dsaTracker.difficulty)));
+    const dsaTech = inferCourseTechnologies(dsaTracker);
+    assert.ok(dsaTech.includes('C++') || dsaTech.includes('Algorithms'));
+  });
+
+  test('toggleTrackerFavorite, toggleTrackerBookmark, and filterAndSortTrackers support search, difficulty, technology, favorites, and sorting', () => {
+    const t1 = toggleTrackerFavorite(structuredClone(PRESET_TRACKERS[0])); // DSA, 2 lessons completed
+    const t2 = toggleTrackerBookmark(structuredClone(PRESET_TRACKERS[1])); // Web Dev, 1 lesson completed
+    const t3 = buildDynamicTrackerFromInput({
+      inputUrl: 'https://www.youtube.com/playlist?list=PL_PYTHON',
+      rawTopic: 'Python for Beginners',
+      trackerId: 'tracker-lib-python',
+    });
+
+    const list = [t1, t2, t3];
+
+    // Filter by onlyFavorites
+    const favs = filterAndSortTrackers(list, { onlyFavorites: true });
+    assert.equal(favs.length, 1);
+    assert.equal(favs[0].id, t1.id);
+
+    // Filter by onlyBookmarked
+    const bookmarked = filterAndSortTrackers(list, { onlyBookmarked: true });
+    assert.equal(bookmarked.length, 1);
+    assert.equal(bookmarked[0].id, t2.id);
+
+    // Filter by search query
+    const pythonHits = filterAndSortTrackers(list, { searchQuery: 'Python' });
+    assert.equal(pythonHits.length, 1);
+    assert.equal(pythonHits[0].id, 'tracker-lib-python');
+
+    // Sort by completion descending (t2 is 1/4 = 25%, t1 is 2/9 = 22%, t3 is 0%)
+    const sortedByCompletion = filterAndSortTrackers(list, { sortBy: 'completion' });
+    assert.equal(sortedByCompletion[0].id, t2.id);
+    assert.equal(sortedByCompletion[1].id, t1.id);
+    assert.equal(sortedByCompletion[2].id, t3.id);
+
+    // Sort by title A-Z
+    const sortedByTitle = filterAndSortTrackers(list, { sortBy: 'title' });
+    assert.ok(sortedByTitle[0].title.localeCompare(sortedByTitle[1].title) <= 0);
+  });
+});
+
+describe('Unit Tests: LMS Phase — Student Dashboard Summary, Weekly Activity & User Data Isolation (TDD)', () => {
+  test('computeStudentDashboardSummary and computeWeeklyLearningActivity calculate accurate totals, streak, and 7-day history', () => {
+    const trackers = structuredClone(PRESET_TRACKERS);
+    const summary = computeStudentDashboardSummary(
+      trackers,
+      [
+        { date: '2026-11-04', minutesStudied: 60, lessonsCompletedCount: 1 },
+        { date: '2026-11-03', minutesStudied: 45, lessonsCompletedCount: 1 },
+      ],
+      5,
+      60,
+      trackers[0].id,
+      '2026-11-04'
+    );
+
+    assert.equal(summary.totalEnrolledCourses, trackers.length);
+    assert.ok(summary.totalCompletedLessons >= 3);
+    assert.ok(summary.totalAvailableLessons >= 15);
+    assert.ok(summary.overallProgressPercent > 0 && summary.overallProgressPercent <= 100);
+    assert.equal(summary.currentStreakDays, 5);
+    assert.equal(summary.weeklyActivity.length, 7);
+    assert.ok(summary.continueLearning);
+    assert.ok(summary.recentlyAccessedCourses.length > 0);
+  });
+
+  test('getUserScopedStorageKey isolates localStorage keys per userId and deleteTrackerFromList removes target course cleanly', () => {
+    assert.equal(getUserScopedStorageKey(undefined, 'devtrack_trackers_v2'), 'devtrack_trackers_v2');
+    assert.equal(
+      getUserScopedStorageKey('user_alex_99', 'devtrack_trackers_v2'),
+      'devtrack_trackers_v2__user_user_alex_99'
+    );
+
+    const list = structuredClone(PRESET_TRACKERS);
+    const remaining = deleteTrackerFromList(list, list[0].id);
+    assert.equal(remaining.length, list.length - 1);
+    assert.ok(!remaining.some(t => t.id === list[0].id));
+  });
+});
+
+

@@ -1,9 +1,27 @@
-import { Tracker, StudySquad } from '../types';
+import { Tracker, StudySquad, DailyLogEntry } from '../types';
 
 export const AVATAR_ALEX = '/src/assets/images/avatar_student_alex_1793187697984.jpg';
 export const AVATAR_PRIYA = '/src/assets/images/avatar_student_priya_1793187699070.jpg';
 export const AVATAR_MARCUS = '/src/assets/images/avatar_student_marcus_1793187699902.jpg';
 export const BANNER_WORKSPACE = '/src/assets/images/banner_study_workspace_1793187700801.jpg';
+
+export const INITIAL_DAILY_LOGS: DailyLogEntry[] = [
+  {
+    date: new Date(Date.now() - 86400000 * 3).toISOString().slice(0, 10),
+    minutesStudied: 60,
+    lessonsCompletedCount: 1,
+  },
+  {
+    date: new Date(Date.now() - 86400000 * 2).toISOString().slice(0, 10),
+    minutesStudied: 45,
+    lessonsCompletedCount: 1,
+  },
+  {
+    date: new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+    minutesStudied: 50,
+    lessonsCompletedCount: 1,
+  },
+];
 
 export const PRESET_TRACKERS: Tracker[] = [
   {

@@ -1,9 +1,10 @@
 import React from 'react';
-import { Plus, Shield, EyeOff } from 'lucide-react';
+import { Plus, EyeOff } from 'lucide-react';
+import { NavTab } from '../utils/studyWorkspaceLogic';
 
 interface NavbarProps {
-  activeTab: 'today' | 'curriculum' | 'mentor' | 'squads' | 'schedule';
-  setActiveTab: (tab: 'today' | 'curriculum' | 'mentor' | 'squads' | 'schedule') => void;
+  activeTab: NavTab;
+  setActiveTab: (tab: NavTab) => void;
   streakDays: number;
   isMuted: boolean;
   toggleMute: () => void;
@@ -41,7 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             DevTrack
           </button>
 
-          {/* Zone 2: Navigation links (hides non-essential tabs in Deep Work mode) */}
+          {/* Zone 2: 5 concise single-line text navigation links */}
           {isDeepWork ? (
             <div className="hidden md:flex items-center gap-6 text-xs font-medium text-slate-300">
               <span className="flex items-center gap-2 text-indigo-300 font-semibold whitespace-nowrap shrink-0">
@@ -58,7 +59,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     : 'border-transparent text-slate-400 hover:text-white'
                 }`}
               >
-                Active Study Session
+                Active Session
               </button>
               <button
                 type="button"
@@ -69,11 +70,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                     : 'border-transparent text-slate-400 hover:text-white'
                 }`}
               >
-                Ask Professor Mentor
+                Concept Mentor
               </button>
             </div>
           ) : (
-            <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
+            <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600">
               <button
                 type="button"
                 onClick={() => setActiveTab('today')}
@@ -84,6 +85,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }`}
               >
                 Today&apos;s Tasks
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('dashboard')}
+                className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
+                  activeTab === 'dashboard'
+                    ? 'border-indigo-600 text-slate-900 font-semibold'
+                    : 'border-transparent hover:text-slate-900 hover:border-slate-300'
+                }`}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('library')}
+                className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
+                  activeTab === 'library'
+                    ? 'border-indigo-600 text-slate-900 font-semibold'
+                    : 'border-transparent hover:text-slate-900 hover:border-slate-300'
+                }`}
+              >
+                Course Library
               </button>
               <button
                 type="button"
@@ -107,53 +130,20 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 Concept Mentor
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('squads')}
-                className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
-                  activeTab === 'squads'
-                    ? 'border-indigo-600 text-slate-900 font-semibold'
-                    : 'border-transparent hover:text-slate-900 hover:border-slate-300'
-                }`}
-              >
-                Study Squads
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('schedule')}
-                className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
-                  activeTab === 'schedule'
-                    ? 'border-indigo-600 text-slate-900 font-semibold'
-                    : 'border-transparent hover:text-slate-900 hover:border-slate-300'
-                }`}
-              >
-                Schedule &amp; Sync
-              </button>
             </nav>
           )}
 
-          {/* Zone 3: Deep Work Toggle + Primary Action (max 2 items) */}
+          {/* Zone 3: 1 Primary Action */}
           <div className="flex items-center gap-3 shrink-0">
-            <button
-              type="button"
-              onClick={onToggleDeepWork}
-              aria-pressed={isDeepWork}
-              title={
-                isDeepWork
-                  ? 'Exit Deep Work mode and restore all navigation tabs'
-                  : 'Enable Deep Work mode to hide squads, roadmap lists, and distractions'
-              }
-              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                isDeepWork
-                  ? 'bg-indigo-500 hover:bg-indigo-400 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              }`}
-            >
-              <Shield className="w-3.5 h-3.5" />
-              <span>{isDeepWork ? 'Exit Deep Work' : 'Deep Work'}</span>
-            </button>
-
-            {!isDeepWork && (
+            {isDeepWork ? (
+              <button
+                type="button"
+                onClick={onToggleDeepWork}
+                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-500 hover:bg-indigo-400 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                Exit Deep Work
+              </button>
+            ) : (
               <button
                 type="button"
                 onClick={onOpenCreateModal}
@@ -166,7 +156,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Mobile Navigation Row (Hidden in Deep Work mode except session/mentor toggle) */}
+        {/* Mobile Navigation Row */}
         {isDeepWork ? (
           <div className="md:hidden flex items-center justify-between py-2 border-t border-slate-800 text-xs font-medium text-slate-300">
             <span className="text-indigo-300 font-semibold flex items-center gap-1.5">
@@ -179,7 +169,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setActiveTab('today')}
                 className={`px-2 py-1 ${activeTab === 'today' ? 'text-white font-bold underline' : 'text-slate-400'}`}
               >
-                Study Session
+                Session
               </button>
               <button
                 type="button"
@@ -191,13 +181,27 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
         ) : (
-          <div className="md:hidden flex items-center justify-around py-2 border-t border-slate-100 text-xs font-medium text-slate-600 overflow-x-auto">
+          <div className="md:hidden flex items-center justify-between gap-2 py-2 border-t border-slate-100 text-xs font-medium text-slate-600 overflow-x-auto">
             <button
               type="button"
               onClick={() => setActiveTab('today')}
               className={`px-2 py-1 whitespace-nowrap shrink-0 ${activeTab === 'today' ? 'text-indigo-600 font-bold' : ''}`}
             >
               Tasks
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('dashboard')}
+              className={`px-2 py-1 whitespace-nowrap shrink-0 ${activeTab === 'dashboard' ? 'text-indigo-600 font-bold' : ''}`}
+            >
+              Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('library')}
+              className={`px-2 py-1 whitespace-nowrap shrink-0 ${activeTab === 'library' ? 'text-indigo-600 font-bold' : ''}`}
+            >
+              Library
             </button>
             <button
               type="button"
@@ -233,3 +237,4 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
+

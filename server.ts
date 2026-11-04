@@ -10,6 +10,12 @@ import {
   parseYouTubeSourceUrl,
   ScrapedPlaylistVideoItem,
 } from './src/utils/studyWorkspaceLogic';
+import {
+  discoverYouTubePlaylist,
+  importManualMultipleVideoUrls,
+  buildTrackerFromVerifiedLessons,
+  PLAYLIST_FALLBACK_MESSAGE,
+} from './src/utils/youtubePlaylistDiscovery';
 
 dotenv.config();
 
@@ -144,7 +150,7 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
 
         const entryRegex = /<entry>[\s\S]*?<yt:videoId>([^<]+)<\/yt:videoId>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<\/entry>/g;
         let m: RegExpExecArray | null;
-        while ((m = entryRegex.exec(xml)) !== null && xmlVideos.length < 15) {
+        while ((m = entryRegex.exec(xml)) !== null) {
           const vid = m[1].trim();
           const vidTitle = decodeHtmlEntities(m[2].trim());
           if (vid && vidTitle) {
@@ -161,13 +167,16 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
     }
   }
 
-  // 3. Fetch the watch page with ?v=FIRST_VID&list=PLAYLIST_ID to extract playlistPanelVideoRenderer (includes exact durations and up to 16 sequential videos)
+  // 3. Fetch the watch page (?v=FIRST_VID&list=PLAYLIST_ID) or playlist page (/playlist?list=PLAYLIST_ID)
+  // to extract playlistPanelVideoRenderer and playlistVideoRenderer (includes exact durations and up to 16 sequential videos)
   const seedVideoId = parsed.videoId || xmlVideos[0]?.videoId;
-  if (effectivePlaylistId && seedVideoId) {
+  if (effectivePlaylistId) {
     try {
-      const watchPlaylistUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(seedVideoId)}&list=${encodeURIComponent(effectivePlaylistId)}`;
+      const targetScrapeUrl = seedVideoId
+        ? `https://www.youtube.com/watch?v=${encodeURIComponent(seedVideoId)}&list=${encodeURIComponent(effectivePlaylistId)}`
+        : `https://www.youtube.com/playlist?list=${encodeURIComponent(effectivePlaylistId)}`;
       const pageRes = await withTimeout(
-        fetch(watchPlaylistUrl, {
+        fetch(targetScrapeUrl, {
           headers: {
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -175,7 +184,7 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
           },
         }),
         2800,
-        'Watch playlist scrape timeout'
+        'Watch/playlist scrape timeout'
       );
 
       if (pageRes.ok) {
@@ -189,15 +198,32 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
             const ytData = JSON.parse(jsonStr);
 
             const collectPanelVideos = (node: any) => {
-              if (!node || typeof node !== 'object' || playlistVideos.length >= 15) return;
+              if (!node || typeof node !== 'object') return;
               if (node.playlistPanelRenderer?.title && typeof node.playlistPanelRenderer.title === 'string') {
                 title = node.playlistPanelRenderer.title.trim();
               }
-              if (node.playlistPanelVideoRenderer) {
-                const r = node.playlistPanelVideoRenderer;
-                const vid = r.videoId;
-                const vidTitle = r.title?.simpleText || r.title?.runs?.[0]?.text || '';
-                const lengthStr = r.lengthText?.simpleText || r.lengthText?.runs?.[0]?.text || '';
+              if (
+                node.playlistMetadataRenderer?.title &&
+                typeof node.playlistMetadataRenderer.title === 'string'
+              ) {
+                title = node.playlistMetadataRenderer.title.trim();
+              }
+              const videoRenderer = node.playlistPanelVideoRenderer || node.playlistVideoRenderer;
+              if (videoRenderer) {
+                const vid = videoRenderer.videoId;
+                const vidTitle =
+                  videoRenderer.title?.simpleText || videoRenderer.title?.runs?.[0]?.text || '';
+                const lengthStr =
+                  videoRenderer.lengthText?.simpleText ||
+                  videoRenderer.lengthText?.runs?.[0]?.text ||
+                  '';
+                const byline =
+                  videoRenderer.shortBylineText?.runs?.[0]?.text ||
+                  videoRenderer.longBylineText?.runs?.[0]?.text ||
+                  '';
+                if (byline && !instructor) {
+                  instructor = String(byline).trim();
+                }
                 if (vid && vidTitle && !playlistVideos.some(v => v.videoId === String(vid))) {
                   playlistVideos.push({
                     videoId: String(vid),
@@ -219,7 +245,7 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
         }
       }
     } catch {
-      // Fall back to xmlVideos if watch page parse fails
+      // Fall back to xmlVideos if watch/playlist page parse fails
     }
   }
 
@@ -230,10 +256,134 @@ async function scrapeYouTubePlaylistOrVideo(rawUrl: string): Promise<{
   return { title, instructor, playlistVideos };
 }
 
+// Endpoint: Smart YouTube Playlist Discovery (single video URL or playlist URL)
+app.post('/api/youtube/discover', async (req, res) => {
+  try {
+    const { url = '', selectedPlaylistId = '' } = req.body || {};
+    const result = await discoverYouTubePlaylist({
+      inputUrl: String(url || '').trim(),
+      selectedPlaylistId: String(selectedPlaylistId || '').trim() || undefined,
+      apiKey: process.env.YOUTUBE_API_KEY,
+    });
+    return res.json({
+      success: result.status === 'playlist_found' || result.status === 'multiple_playlists_found',
+      data: result,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to discover YouTube playlist.',
+    });
+  }
+});
+
+// Endpoint: Manual Multiple-Video URL Import
+app.post('/api/youtube/import-manual', async (req, res) => {
+  try {
+    const {
+      rawUrls = '',
+      courseTitle = '',
+      dailyMinutes = 60,
+      scheduledTime = '20:00',
+      studyDays = [1, 2, 3, 4, 5, 6],
+      trackerId,
+    } = req.body || {};
+
+    const imported = await importManualMultipleVideoUrls({
+      rawUrls,
+      courseTitle: String(courseTitle || '').trim(),
+      apiKey: process.env.YOUTUBE_API_KEY,
+    });
+
+    if (!imported.success || imported.lessons.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: imported.message,
+      });
+    }
+
+    const tracker = buildTrackerFromVerifiedLessons({
+      lessons: imported.lessons,
+      playlistId: null,
+      courseTitle: imported.inferredTitle,
+      instructor: imported.inferredInstructor,
+      category: imported.inferredCategory,
+      sourceUrl: imported.lessons[0].videoUrl,
+      dailyMinutes: Number(dailyMinutes) || 60,
+      scheduledTime: String(scheduledTime || '20:00'),
+      studyDays: Array.isArray(studyDays) && studyDays.length > 0 ? studyDays : [1, 2, 3, 4, 5, 6],
+      trackerId: trackerId || `tracker-${Date.now()}`,
+    });
+
+    return res.json({
+      success: true,
+      data: tracker,
+      lessons: imported.lessons,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to import manual video URLs.',
+    });
+  }
+});
+
 // Endpoint: Extract & Generate Personalized Curriculum from URL or Syllabus
 app.post('/api/extract-resource', async (req, res) => {
-  const { url = '', rawTopic = '', dailyMinutes = 60 } = req.body || {};
+  const {
+    url = '',
+    rawTopic = '',
+    dailyMinutes = 60,
+    scheduledTime = '20:00',
+    studyDays = [1, 2, 3, 4, 5, 6],
+    selectedPlaylistId = '',
+    requireVerifiedPlaylist = false,
+  } = req.body || {};
   const userSubject = rawTopic && !/^https?:\/\//i.test(rawTopic.trim()) ? rawTopic.trim() : '';
+  const parsedInput = parseYouTubeSourceUrl(url);
+
+  // Run Smart YouTube Playlist Discovery first when a YouTube URL is provided
+  if (parsedInput.isYouTube) {
+    const discovery = await discoverYouTubePlaylist({
+      inputUrl: url,
+      selectedPlaylistId: String(selectedPlaylistId || '').trim() || undefined,
+      apiKey: process.env.YOUTUBE_API_KEY,
+    });
+
+    if (
+      (discovery.status === 'playlist_found' || discovery.status === 'multiple_playlists_found') &&
+      discovery.selectedPlaylist &&
+      discovery.selectedPlaylist.lessons.length >= 2
+    ) {
+      const chosen = discovery.selectedPlaylist;
+      const tracker = buildTrackerFromVerifiedLessons({
+        lessons: chosen.lessons,
+        playlistId: chosen.playlistId,
+        courseTitle: userSubject ? `${userSubject}: ${chosen.title}` : chosen.title,
+        instructor: chosen.channelTitle,
+        category: discovery.videoMetadata?.category,
+        sourceUrl: `https://www.youtube.com/playlist?list=${chosen.playlistId}`,
+        dailyMinutes: Number(dailyMinutes) || 60,
+        scheduledTime: String(scheduledTime || '20:00'),
+        studyDays: Array.isArray(studyDays) && studyDays.length > 0 ? studyDays : [1, 2, 3, 4, 5, 6],
+      });
+      return res.json({
+        success: true,
+        data: tracker,
+        scrapedPlaylist: true,
+        discovery,
+      });
+    }
+
+    if (requireVerifiedPlaylist && discovery.status === 'no_playlist_found') {
+      return res.status(422).json({
+        success: false,
+        status: 'no_playlist_found',
+        error: PLAYLIST_FALLBACK_MESSAGE,
+        discovery,
+      });
+    }
+  }
 
   // Scrape YouTube metadata and playlist video items if a YouTube link was provided
   const scraped = await scrapeYouTubePlaylistOrVideo(url);
@@ -583,6 +733,75 @@ Return ONLY valid JSON matching this exact structure:
   }
 });
 
+// ============================================================================
+// User-Specific Account Progress Synchronization & Data Deletion Store
+// ============================================================================
+interface UserAccountSnapshot {
+  userId: string;
+  trackers: any[];
+  activeTrackerId: string;
+  streakDays: number;
+  dailyLogs: any[];
+  learnerProfile?: any;
+  updatedAt: string;
+}
+
+const userAccountStore = new Map<string, UserAccountSnapshot>();
+
+function sanitizeUserId(raw: any): string {
+  const str = String(raw || 'default-learner').trim();
+  return str.replace(/[^a-zA-Z0-9_@.-]/g, '_').slice(0, 80) || 'default-learner';
+}
+
+app.get('/api/account/sync', (req, res) => {
+  const userId = sanitizeUserId(req.query.userId);
+  const snapshot = userAccountStore.get(userId) || null;
+  return res.json({
+    success: true,
+    userId,
+    data: snapshot,
+  });
+});
+
+app.post('/api/account/sync', (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = sanitizeUserId(body.userId);
+    const snapshot: UserAccountSnapshot = {
+      userId,
+      trackers: Array.isArray(body.trackers) ? body.trackers : [],
+      activeTrackerId: String(body.activeTrackerId || ''),
+      streakDays: Number.isFinite(Number(body.streakDays)) ? Number(body.streakDays) : 1,
+      dailyLogs: Array.isArray(body.dailyLogs) ? body.dailyLogs : [],
+      learnerProfile: body.learnerProfile || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    userAccountStore.set(userId, snapshot);
+    return res.json({
+      success: true,
+      userId,
+      updatedAt: snapshot.updatedAt,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to sync account progress.',
+    });
+  }
+});
+
+app.delete('/api/account/data', (req, res) => {
+  const userId = sanitizeUserId(req.body?.userId || req.query?.userId);
+  const existed = userAccountStore.has(userId);
+  userAccountStore.delete(userId);
+  return res.json({
+    success: true,
+    userId,
+    deleted: existed,
+    message: 'All saved learning data for this user account has been permanently deleted.',
+  });
+});
+
 // Setup Vite middleware in dev or static files in production
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
@@ -606,3 +825,4 @@ async function startServer() {
 }
 
 startServer();
+

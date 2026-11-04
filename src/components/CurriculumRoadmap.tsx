@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle2, Circle, ExternalLink, ChevronDown, ChevronUp, FileText, Clock } from 'lucide-react';
+import { CheckCircle2, Circle, ExternalLink, ChevronDown, ChevronUp, FileText, Clock, Play, Youtube } from 'lucide-react';
 import { Tracker } from '../types';
-import { getCourseThemeTokens, resolveLessonVideoUrl } from '../utils/studyWorkspaceLogic';
+import { getCourseThemeTokens, resolveLessonVideoUrl, resolveLessonEmbedUrl } from '../utils/studyWorkspaceLogic';
 
 interface CurriculumRoadmapProps {
   tracker: Tracker;
   onToggleLesson: (lessonId: string) => void;
   onUpdateNotes: (lessonId: string, notes: string) => void;
   onOpenCreateModal: () => void;
+  onSelectLessonInSession?: (lessonId: string) => void;
 }
 
 export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
@@ -15,6 +16,7 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
   onToggleLesson,
   onUpdateNotes,
   onOpenCreateModal,
+  onSelectLessonInSession,
 }) => {
   const [filter, setFilter] = useState<'all' | 'remaining' | 'completed'>('all');
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>(() => {
@@ -23,6 +25,7 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
     return initial;
   });
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
+  const [playingLessonId, setPlayingLessonId] = useState<string | null>(null);
 
   // Reset expanded modules and editing state whenever the active course changes
   useEffect(() => {
@@ -32,6 +35,7 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
     });
     setExpandedModules(nextExpanded);
     setEditingNotesId(null);
+    setPlayingLessonId(null);
   }, [tracker.id, tracker.sourceUrl]);
 
   // Compute statistics and global 0-based lesson index map for direct lecture navigation
@@ -262,15 +266,20 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
                         </button>
 
                         {/* Lesson Info */}
-                        <div className="flex-1 space-y-1.5">
+                        <div className="flex-1 space-y-2">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                            <h4
-                              className={`text-sm font-semibold ${
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPlayingLessonId(prev => (prev === lesson.id ? null : lesson.id))
+                              }
+                              className={`text-sm font-semibold text-left hover:text-indigo-600 transition-colors cursor-pointer ${
                                 lesson.completed ? 'line-through text-slate-500' : 'text-slate-900'
                               }`}
+                              title={`Click to play ${lesson.title}`}
                             >
                               {lesson.title}
-                            </h4>
+                            </button>
                             <span className="text-xs text-slate-400 font-mono tabular-nums shrink-0 flex items-center gap-1">
                               <Clock className="w-3 h-3" />
                               {lesson.durationMinutes}m
@@ -293,6 +302,48 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
                               <strong className="text-slate-700">Practice:</strong> {lesson.practiceTask}
                             </p>
                           )}
+
+                          {/* Inline Embedded YouTube Player when Lesson X is clicked */}
+                          {playingLessonId === lesson.id &&
+                            (() => {
+                              const lecIdx = lessonIndexMap[lesson.id] ?? 0;
+                              const embedUrl = resolveLessonEmbedUrl(
+                                tracker.sourceUrl,
+                                lesson.videoUrl,
+                                lecIdx
+                              );
+                              if (!embedUrl) return null;
+
+                              return (
+                                <div className="pt-2 space-y-2">
+                                  <div className="flex items-center justify-between text-xs bg-indigo-50/70 px-3 py-1.5 rounded-lg border border-indigo-100">
+                                    <span className="font-semibold text-indigo-950 flex items-center gap-1.5">
+                                      <Youtube className="w-4 h-4 text-rose-600" />
+                                      <span>
+                                        Playing Lecture {lecIdx + 1}: {lesson.title}
+                                      </span>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPlayingLessonId(null)}
+                                      className="text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
+                                    >
+                                      Close Player
+                                    </button>
+                                  </div>
+                                  <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-xs">
+                                    <iframe
+                                      key={`${tracker.id}-${lesson.id}-${lecIdx}`}
+                                      src={embedUrl}
+                                      title={`YouTube player for ${lesson.title}`}
+                                      className="w-full h-full border-0"
+                                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                      allowFullScreen
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })()}
 
                           {/* Notes view or editor */}
                           {editingNotesId === lesson.id ? (
@@ -326,7 +377,36 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
                               </div>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-4 pt-1 text-xs">
+                            <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPlayingLessonId(prev => (prev === lesson.id ? null : lesson.id))
+                                }
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                                  playingLessonId === lesson.id
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                                }`}
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                                <span>
+                                  {playingLessonId === lesson.id
+                                    ? `Hide Lecture ${(lessonIndexMap[lesson.id] ?? 0) + 1} Player`
+                                    : `Play Lecture ${(lessonIndexMap[lesson.id] ?? 0) + 1}`}
+                                </span>
+                              </button>
+
+                              {onSelectLessonInSession && (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectLessonInSession(lesson.id)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold transition-colors cursor-pointer"
+                                >
+                                  <span>Open in Study Desk</span>
+                                </button>
+                              )}
+
                               <a
                                 href={
                                   tracker.id === 'tracker-dsa-striver' || tracker.id === 'tracker-fullstack-mern'
@@ -344,7 +424,7 @@ export const CurriculumRoadmap: React.FC<CurriculumRoadmapProps> = ({
                                 className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
-                                <span>Watch Lecture {(lessonIndexMap[lesson.id] ?? 0) + 1}</span>
+                                <span>Watch Lecture {(lessonIndexMap[lesson.id] ?? 0) + 1} on YouTube</span>
                               </a>
 
                               <button

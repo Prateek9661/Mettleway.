@@ -13,12 +13,30 @@ import {
   computeSkillMilestones,
   computeProfileCourseAnalytics,
   markEntireCourseCompleted,
+  getActiveOrSelectedLesson,
+  resolveLessonEmbedUrl,
+  resolveLessonVideoUrl,
+  recordLastWatchedLesson,
+  getPreviousAndNextLesson,
+  getContinueLearningState,
+  addVideoNoteToTracker,
+  exportCourseNotesToMarkdown,
+  filterAndSortTrackers,
+  computeStudentDashboardSummary,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
   generateMultipleSessionsICS,
 } from './calendarExport';
 import { PRESET_TRACKERS } from './mockPresets';
+import {
+  discoverYouTubePlaylist,
+  importManualMultipleVideoUrls,
+  buildTrackerFromVerifiedLessons,
+  assertUniqueVideoIdsAcrossLessons,
+  PLAYLIST_FALLBACK_MESSAGE,
+  FetchLike,
+} from './youtubePlaylistDiscovery';
 
 describe('Integration Tests: End-to-End Learner Study Workflow & Calendar Sync', () => {
   test('completing active lesson updates course mastery, advances active lesson, and shifts upcoming ICS calendar schedule', () => {
@@ -465,4 +483,635 @@ describe('Integration Tests: Dynamic Course Addition, Switching & YouTube URL Sy
     assert.equal(analytics.completedCourses[0].completedAt, '2026-11-01T15:00:00.000Z');
     assert.ok(analytics.totalHoursLogged >= analytics.completedCourses[0].hoursLogged);
   });
+
+  test('importing a YouTube video link from a playlist generates full multi-lecture curriculum and clicking Lesson X loads Lecture X in the player', () => {
+    // User pastes a single video URL from a playlist where oEmbed returned "Lecture 1: Introduction | Complete Docker & Kubernetes Course"
+    const pastedPlaylistVideoUrl =
+      'https://www.youtube.com/watch?v=vid_docker_1&list=PL_DOCKER_K8S_SERIES';
+    const tracker = buildDynamicTrackerFromInput({
+      inputUrl: pastedPlaylistVideoUrl,
+      rawTopic: 'Lecture 1: Introduction | Complete Docker & Kubernetes Course',
+      extractedData: {
+        title: 'Lecture 1: Introduction | Complete Docker & Kubernetes Course',
+        instructor: 'DevOps Academy',
+        // Simulate partial client scrape where only 1 video was returned initially
+        playlistVideos: [{ videoId: 'vid_docker_1', title: 'Introduction & Container Internals', durationMinutes: 35 }],
+      },
+      trackerId: 'tracker-docker-playlist-e2e',
+    });
+
+    // 1. Course title is normalized to the series title (not stuck on "Lecture 1")
+    assert.equal(tracker.title, 'Complete Docker & Kubernetes Course');
+
+    // 2. Full multi-lecture syllabus is generated (never just 1 single video!)
+    const lessons = tracker.modules.flatMap(m => m.lessons);
+    assert.ok(lessons.length >= 6, `Expected at least 6 sequential lessons, got ${lessons.length}`);
+    assert.match(lessons[0].title, /^Lesson 1:/);
+    assert.match(lessons[1].title, /^Lesson 2:/);
+    assert.match(lessons[2].title, /^Lesson 3:/);
+
+    // 3. Clicking on Lesson 3 (index 2) dynamically updates the active lesson and player URLs to Lecture 3 (never defaulting back to vid_docker_1)
+    const selectedLessonState = getActiveOrSelectedLesson(tracker, lessons[2].id);
+    assert.equal(selectedLessonState.lessonIndex, 2);
+    assert.equal(selectedLessonState.lesson?.id, lessons[2].id);
+
+    const lesson1Embed = resolveLessonEmbedUrl(tracker.sourceUrl, lessons[0].videoUrl, 0);
+    const lesson3Embed = resolveLessonEmbedUrl(
+      tracker.sourceUrl,
+       selectedLessonState.lesson!.videoUrl,
+      selectedLessonState.lessonIndex
+    );
+    const lesson3Watch = resolveLessonVideoUrl(
+      tracker.sourceUrl,
+      selectedLessonState.lesson!.videoUrl,
+      selectedLessonState.lessonIndex,
+      tracker.title,
+      selectedLessonState.lesson!.title
+    );
+
+    assert.ok(lesson1Embed.includes('vid_docker_1'));
+    assert.ok(
+      !lesson3Embed.includes('vid_docker_1'),
+      `Lesson 3 embed (${lesson3Embed}) must NOT default back to Lesson 1's vid_docker_1`
+    );
+    assert.ok(lesson3Embed.includes('list=PL_DOCKER_K8S_SERIES'));
+    assert.ok(lesson3Embed.includes('index=2'));
+    assert.ok(!lesson3Watch.includes('vid_docker_1'));
+    assert.ok(lesson3Watch.includes('index=3'));
+  });
 });
+
+describe('Integration Tests: Smart YouTube Playlist Discovery (Scenarios A, B, C, D, E)', () => {
+  test('Scenario A: A video URL containing a playlist ID imports all playlist lessons in original order with unique videoIds', async () => {
+    const mockFetch: FetchLike = async (url: string) => {
+      if (url.includes('/youtube/v3/videos')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                id: 'vid_rust_1',
+                status: { privacyStatus: 'public' },
+                contentDetails: { duration: 'PT25M10S' },
+                snippet: {
+                  title: 'Lecture 1: Rust Ownership & Borrowing | Complete Rust Course',
+                  description: 'Learn Rust from scratch',
+                  channelId: 'UC_RUST_ACADEMY',
+                  channelTitle: 'Rust Systems Academy',
+                  thumbnails: { high: { url: 'https://i.ytimg.com/vi/vid_rust_1/hqdefault.jpg' } },
+                },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      if (url.includes('/youtube/v3/playlists')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                id: 'PL_RUST_COMPLETE_101',
+                snippet: {
+                  title: 'Complete Rust Systems Programming Course',
+                  description: 'Full Rust playlist',
+                  channelId: 'UC_RUST_ACADEMY',
+                  channelTitle: 'Rust Systems Academy',
+                  thumbnails: { high: { url: 'https://i.ytimg.com/vi/vid_rust_1/hqdefault.jpg' } },
+                },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      if (url.includes('/youtube/v3/playlistItems')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                snippet: {
+                  position: 0,
+                  title: 'Rust Ownership & Borrowing',
+                  resourceId: { videoId: 'vid_rust_1' },
+                },
+                contentDetails: { videoId: 'vid_rust_1' },
+                status: { privacyStatus: 'public' },
+              },
+              {
+                snippet: {
+                  position: 1,
+                  title: 'Structs, Enums & Pattern Matching',
+                  resourceId: { videoId: 'vid_rust_2' },
+                },
+                contentDetails: { videoId: 'vid_rust_2' },
+                status: { privacyStatus: 'public' },
+              },
+              {
+                snippet: {
+                  position: 2,
+                  title: 'Traits, Generics & Lifetimes',
+                  resourceId: { videoId: 'vid_rust_3' },
+                },
+                contentDetails: { videoId: 'vid_rust_3' },
+                status: { privacyStatus: 'public' },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+    };
+
+    const discovery = await discoverYouTubePlaylist({
+      inputUrl: 'https://www.youtube.com/watch?v=vid_rust_1&list=PL_RUST_COMPLETE_101',
+      apiKey: 'TEST_SERVER_API_KEY',
+      fetchFn: mockFetch,
+    });
+
+    assert.equal(discovery.status, 'playlist_found');
+    assert.ok(discovery.selectedPlaylist);
+    assert.equal(discovery.selectedPlaylist.playlistId, 'PL_RUST_COMPLETE_101');
+    assert.equal(discovery.selectedPlaylist.lessons.length, 3);
+
+    const tracker = buildTrackerFromVerifiedLessons({
+      lessons: discovery.selectedPlaylist.lessons,
+      playlistId: discovery.selectedPlaylist.playlistId,
+      courseTitle: discovery.selectedPlaylist.title,
+      instructor: discovery.selectedPlaylist.channelTitle,
+      sourceUrl: 'https://www.youtube.com/playlist?list=PL_RUST_COMPLETE_101',
+    });
+
+    const allLessons = tracker.modules.flatMap(m => m.lessons);
+    assert.equal(allLessons.length, 3);
+    assert.equal(allLessons[0].videoId, 'vid_rust_1');
+    assert.equal(allLessons[1].videoId, 'vid_rust_2');
+    assert.equal(allLessons[2].videoId, 'vid_rust_3');
+    assert.equal(allLessons[0].playlistPosition, 1);
+    assert.equal(allLessons[1].playlistPosition, 2);
+    assert.equal(allLessons[2].playlistPosition, 3);
+    assert.equal(assertUniqueVideoIdsAcrossLessons(allLessons).valid, true);
+  });
+
+  test('Scenario B: A single video URL without a playlist ID discovers the containing playlist via YouTube Data API v3 search + verification', async () => {
+    const mockFetch: FetchLike = async (url: string) => {
+      if (url.includes('/youtube/v3/videos')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                id: 'vid_go_intro',
+                status: { privacyStatus: 'public' },
+                contentDetails: { duration: 'PT30M00S' },
+                snippet: {
+                  title: 'Lesson 1: Go Goroutines & Channels | Golang Backend Course',
+                  description: 'Master Golang backend engineering',
+                  channelId: 'UC_GOLANG_PRO',
+                  channelTitle: 'Golang Pro Engineering',
+                },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      if (url.includes('/youtube/v3/search')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                id: { playlistId: 'PL_UNRELATED_999' },
+                snippet: {
+                  title: 'Unrelated Go Tips',
+                  channelId: 'UC_GOLANG_PRO',
+                  channelTitle: 'Golang Pro Engineering',
+                },
+              },
+              {
+                id: { playlistId: 'PL_GOLANG_BACKEND_MASTER' },
+                snippet: {
+                  title: 'Golang Backend Course Complete Playlist',
+                  description: 'Full Go backend series',
+                  channelId: 'UC_GOLANG_PRO',
+                  channelTitle: 'Golang Pro Engineering',
+                },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      if (url.includes('playlistId=PL_UNRELATED_999')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                snippet: { title: 'Other Video 1', resourceId: { videoId: 'vid_other_1' } },
+                contentDetails: { videoId: 'vid_other_1' },
+                status: { privacyStatus: 'public' },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      if (url.includes('playlistId=PL_GOLANG_BACKEND_MASTER')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                snippet: { title: 'Go Goroutines & Channels', resourceId: { videoId: 'vid_go_intro' } },
+                contentDetails: { videoId: 'vid_go_intro' },
+                status: { privacyStatus: 'public' },
+              },
+              {
+                snippet: { title: 'Context, Mutexes & WaitGroups', resourceId: { videoId: 'vid_go_2' } },
+                contentDetails: { videoId: 'vid_go_2' },
+                status: { privacyStatus: 'public' },
+              },
+              {
+                snippet: { title: 'Building Production HTTP Microservices', resourceId: { videoId: 'vid_go_3' } },
+                contentDetails: { videoId: 'vid_go_3' },
+                status: { privacyStatus: 'public' },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+    };
+
+    const discovery = await discoverYouTubePlaylist({
+      inputUrl: 'https://www.youtube.com/watch?v=vid_go_intro',
+      apiKey: 'TEST_SERVER_API_KEY',
+      fetchFn: mockFetch,
+    });
+
+    assert.equal(discovery.status, 'playlist_found');
+    assert.ok(discovery.selectedPlaylist);
+    assert.equal(discovery.selectedPlaylist.playlistId, 'PL_GOLANG_BACKEND_MASTER');
+    assert.equal(discovery.selectedPlaylist.verifiedContainsVideoId, true);
+    assert.equal(discovery.selectedPlaylist.lessons.length, 3);
+    assert.deepEqual(
+      discovery.selectedPlaylist.lessons.map(l => l.videoId),
+      ['vid_go_intro', 'vid_go_2', 'vid_go_3']
+    );
+  });
+
+  test('Scenario C: A video that belongs to multiple playlists ranks candidates by channel relevance, title similarity, and course relevance', async () => {
+    // kBdlM6hNDAE belongs to both the 12-video Complete DBMS Playlist and the 5-video DBMS Crash Series in the catalog
+    const discovery = await discoverYouTubePlaylist({
+      inputUrl: 'https://www.youtube.com/watch?v=kBdlM6hNDAE',
+      apiKey: '',
+    });
+
+    assert.equal(discovery.status, 'multiple_playlists_found');
+    assert.ok(Array.isArray(discovery.candidates));
+    assert.ok(discovery.candidates.length >= 2);
+    // Highest ranked playlist is the Complete DBMS Playlist
+    assert.equal(discovery.candidates[0].playlistId, 'PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y');
+    assert.ok(discovery.candidates[0].relevanceScore >= discovery.candidates[1].relevanceScore);
+    for (const candidate of discovery.candidates) {
+      assert.equal(candidate.verifiedContainsVideoId, true);
+      assert.equal(assertUniqueVideoIdsAcrossLessons(candidate.lessons).valid, true);
+    }
+  });
+
+  test('Scenario D: A video for which no playlist can be discovered returns the exact fallback message and never fakes a multi-lesson playlist from 1 video', async () => {
+    const mockFetchNoPlaylist: FetchLike = async (url: string) => {
+      if (url.includes('/youtube/v3/videos')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                id: 'vid_standalone_999',
+                status: { privacyStatus: 'public' },
+                contentDetails: { duration: 'PT18M00S' },
+                snippet: {
+                  title: 'My Standalone Keynote Talk 2026',
+                  description: 'Single conference talk',
+                  channelId: 'UC_CONF_TALK',
+                  channelTitle: 'Tech Conf',
+                },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      if (url.includes('/youtube/v3/search')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [] }),
+          text: async () => '',
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+    };
+
+    const discovery = await discoverYouTubePlaylist({
+      inputUrl: 'https://www.youtube.com/watch?v=vid_standalone_999',
+      apiKey: 'TEST_SERVER_API_KEY',
+      fetchFn: mockFetchNoPlaylist,
+    });
+
+    assert.equal(discovery.status, 'no_playlist_found');
+    assert.equal(
+      discovery.message,
+      "We couldn't automatically identify the complete playlist. Please paste the playlist URL or choose another import method."
+    );
+    assert.equal(discovery.message, PLAYLIST_FALLBACK_MESSAGE);
+    assert.equal(discovery.selectedPlaylist ?? null, null);
+    assert.equal((discovery.lessons || []).length, 0);
+
+    // Verify Manual Multiple-Video URL fallback import works and deduplicates videoIds while preserving order
+    const manualImport = await importManualMultipleVideoUrls({
+      rawUrls: [
+        'https://www.youtube.com/watch?v=kBdlM6hNDAE',
+        'https://www.youtube.com/watch?v=3EJlovevfcA',
+        'https://www.youtube.com/watch?v=kBdlM6hNDAE', // duplicate should be removed
+        'https://www.youtube.com/watch?v=pDX4NR4eQf3',
+      ].join('\n'),
+      courseTitle: 'Custom DBMS Track',
+    });
+
+    assert.equal(manualImport.success, true);
+    assert.equal(manualImport.lessons.length, 3);
+    assert.deepEqual(
+      manualImport.lessons.map(l => l.videoId),
+      ['kBdlM6hNDAE', '3EJlovevfcA', 'pDX4NR4eQf3']
+    );
+    assert.equal(assertUniqueVideoIdsAcrossLessons(manualImport.lessons).valid, true);
+  });
+
+  test('Scenario E: A playlist containing more than 50 videos paginates all pages via nextPageToken, filters private/deleted videos, deduplicates, and preserves exact order', async () => {
+    // Generate 65 unique videos across 2 pages (50 on page 1 + 15 on page 2) plus 1 duplicate and 1 private video
+    const page1Items = Array.from({ length: 50 }, (_, idx) => {
+      const num = idx + 1;
+      const vid = `vid_big_${String(num).padStart(3, '0')}`;
+      return {
+        snippet: {
+          position: idx,
+          title: `Lecture ${num}: Distributed Systems Topic ${num}`,
+          resourceId: { videoId: vid },
+          thumbnails: { high: { url: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` } },
+        },
+        contentDetails: { videoId: vid },
+        status: { privacyStatus: 'public' },
+      };
+    });
+
+    const page2Items = [
+      // Duplicate of video #1 (should be deduplicated)
+      {
+        snippet: {
+          position: 50,
+          title: 'Lecture 1: Distributed Systems Topic 1 (Duplicate)',
+          resourceId: { videoId: 'vid_big_001' },
+        },
+        contentDetails: { videoId: 'vid_big_001' },
+        status: { privacyStatus: 'public' },
+      },
+      // Private video (should be filtered out)
+      {
+        snippet: {
+          position: 51,
+          title: 'Private video',
+          resourceId: { videoId: 'vid_private_999' },
+        },
+        contentDetails: { videoId: 'vid_private_999' },
+        status: { privacyStatus: 'private' },
+      },
+      // 15 more valid videos (51..65)
+      ...Array.from({ length: 15 }, (_, idx) => {
+        const num = 51 + idx;
+        const vid = `vid_big_${String(num).padStart(3, '0')}`;
+        return {
+          snippet: {
+            position: 52 + idx,
+            title: `Lecture ${num}: Distributed Systems Topic ${num}`,
+            resourceId: { videoId: vid },
+            thumbnails: { high: { url: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` } },
+          },
+          contentDetails: { videoId: vid },
+          status: { privacyStatus: 'public' },
+        };
+      }),
+    ];
+
+    const mockFetchLargePlaylist: FetchLike = async (url: string) => {
+      if (url.includes('/youtube/v3/playlists')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              {
+                id: 'PL_LARGE_65_COURSE',
+                snippet: {
+                  title: '65-Lecture Distributed Systems Engineering Masterclass',
+                  description: 'Complete 65-video university course',
+                  channelId: 'UC_SYS_ENG',
+                  channelTitle: 'Systems Engineering Lab',
+                },
+              },
+            ],
+          }),
+          text: async () => '',
+        };
+      }
+      if (url.includes('/youtube/v3/playlistItems')) {
+        if (url.includes('pageToken=PAGE_TOKEN_2')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              items: page2Items,
+            }),
+            text: async () => '',
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            nextPageToken: 'PAGE_TOKEN_2',
+            items: page1Items,
+          }),
+          text: async () => '',
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+    };
+
+    const discovery = await discoverYouTubePlaylist({
+      inputUrl: 'https://www.youtube.com/playlist?list=PL_LARGE_65_COURSE',
+      apiKey: 'TEST_SERVER_API_KEY',
+      fetchFn: mockFetchLargePlaylist,
+    });
+
+    assert.equal(discovery.status, 'playlist_found');
+    assert.ok(discovery.selectedPlaylist);
+    assert.equal(discovery.selectedPlaylist.lessons.length, 65);
+    assert.equal(discovery.selectedPlaylist.itemCount, 65);
+
+    const tracker = buildTrackerFromVerifiedLessons({
+      lessons: discovery.selectedPlaylist.lessons,
+      playlistId: 'PL_LARGE_65_COURSE',
+      courseTitle: discovery.selectedPlaylist.title,
+      instructor: discovery.selectedPlaylist.channelTitle,
+      sourceUrl: 'https://www.youtube.com/playlist?list=PL_LARGE_65_COURSE',
+    });
+
+    const allLessons = tracker.modules.flatMap(m => m.lessons);
+    assert.equal(allLessons.length, 65);
+    assert.equal(allLessons[0].videoId, 'vid_big_001');
+    assert.equal(allLessons[0].playlistPosition, 1);
+    assert.equal(allLessons[49].videoId, 'vid_big_050');
+    assert.equal(allLessons[49].playlistPosition, 50);
+    assert.equal(allLessons[50].videoId, 'vid_big_051');
+    assert.equal(allLessons[50].playlistPosition, 51);
+    assert.equal(allLessons[64].videoId, 'vid_big_065');
+    assert.equal(allLessons[64].playlistPosition, 65);
+
+    // Confirm invariant: no duplicate videoId across all 65 lessons
+    const invariantCheck = assertUniqueVideoIdsAcrossLessons(allLessons);
+    assert.equal(invariantCheck.valid, true);
+  });
+});
+
+describe('Integration Tests: Complete Learning Management Experience (Progress, Notes, Library, Dashboard & Account Sync)', () => {
+  test('end-to-end LMS workflow: watch lesson -> add timestamped note -> seek video -> export notes -> filter library -> sync & delete account data', async () => {
+    // 1. Start with preset courses and simulate watching Lesson 4 of Course 1
+    let trackers = structuredClone(PRESET_TRACKERS);
+    const course1Lessons = trackers[0].modules.flatMap(m => m.lessons);
+    const lesson4 = course1Lessons[3];
+
+    trackers[0] = recordLastWatchedLesson(trackers[0], lesson4.id, '2026-11-04T15:00:00.000Z');
+
+    // 2. Verify Continue Learning remembers Lesson 4 and Previous/Next lesson navigation works
+    const continueState = getContinueLearningState(trackers, trackers[0].id);
+    assert.ok(continueState.primaryContinue);
+    assert.equal(continueState.primaryContinue.lessonId, lesson4.id);
+    assert.equal(continueState.primaryContinue.lessonIndex, 3);
+
+    const prevNext = getPreviousAndNextLesson(trackers[0], lesson4.id);
+    assert.equal(prevNext.previousLesson?.id, course1Lessons[2].id);
+    assert.equal(prevNext.nextLesson?.id, course1Lessons[4].id);
+
+    // 3. Add a timestamped personal note on Lesson 4 and verify embed URL seeks to that timestamp
+    trackers[0] = addVideoNoteToTracker(trackers[0], {
+      lessonId: lesson4.id,
+      noteId: 'e2e-note-1',
+      content: 'Kadane subarray maximum invariants hold when resetting negative prefixes.',
+      timestampInput: '05:15',
+      conceptTag: 'Kadane Invariant',
+      isBookmarked: true,
+    });
+
+    const seekEmbed = resolveLessonEmbedUrl(trackers[0].sourceUrl, lesson4.videoUrl, 3, 315);
+    assert.ok(seekEmbed.includes('start=315'));
+
+    const exportedMd = exportCourseNotesToMarkdown(trackers[0]);
+    assert.ok(exportedMd.includes('[05:15]'));
+    assert.ok(exportedMd.includes('Kadane Invariant'));
+
+    // 4. Filter Course Library and compute Student Dashboard Summary
+    const filteredLibrary = filterAndSortTrackers(trackers, {
+      category: 'DSA',
+      sortBy: 'recently_added',
+    });
+    assert.equal(filteredLibrary.length, 1);
+    assert.equal(filteredLibrary[0].id, trackers[0].id);
+
+    const dashboardSummary = computeStudentDashboardSummary(
+      trackers,
+      [{ date: '2026-11-04', minutesStudied: 50, lessonsCompletedCount: 1 }],
+      6,
+      60,
+      trackers[0].id,
+      '2026-11-04'
+    );
+    assert.equal(dashboardSummary.totalEnrolledCourses, trackers.length);
+    assert.equal(dashboardSummary.continueLearning?.lessonId, lesson4.id);
+
+    // 5. Verify live server account sync & user-isolated data deletion if server is running
+    const baseUrl = 'http://localhost:3000';
+    let serverReachable = false;
+    try {
+      const ping = await fetch(baseUrl, { method: 'GET' });
+      serverReachable = ping.ok;
+    } catch {
+      serverReachable = false;
+    }
+
+    if (serverReachable) {
+      const testUserId = 'test_lms_user_isolated_101';
+
+      // Sync learning data to user account
+      const syncRes = await fetch(`${baseUrl}/api/account/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: testUserId,
+          trackers,
+          activeTrackerId: trackers[0].id,
+          dailyLogs: [{ date: '2026-11-04', minutesStudied: 50, lessonsCompletedCount: 1 }],
+          streakDays: 6,
+        }),
+      });
+      assert.equal(syncRes.status, 200);
+      const syncJson = (await syncRes.json()) as any;
+      assert.equal(syncJson.success, true);
+
+      // Fetch synced account data and verify user isolation
+      const getRes = await fetch(
+        `${baseUrl}/api/account/sync?userId=${encodeURIComponent(testUserId)}`
+      );
+      assert.equal(getRes.status, 200);
+      const getJson = (await getRes.json()) as any;
+      assert.equal(getJson.success, true);
+      assert.ok(getJson.data);
+      assert.equal(getJson.data.activeTrackerId, trackers[0].id);
+
+      // Delete user's saved learning data
+      const delRes = await fetch(`${baseUrl}/api/account/data`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: testUserId }),
+      });
+      assert.equal(delRes.status, 200);
+      const delJson = (await delRes.json()) as any;
+      assert.equal(delJson.success, true);
+      assert.equal(delJson.deleted, true);
+
+      // Verify account snapshot is now null after deletion
+      const afterDelRes = await fetch(
+        `${baseUrl}/api/account/sync?userId=${encodeURIComponent(testUserId)}`
+      );
+      const afterDelJson = (await afterDelRes.json()) as any;
+      assert.equal(afterDelJson.data, null);
+    }
+  });
+});
+
+
+

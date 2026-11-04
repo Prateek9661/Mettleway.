@@ -1,13 +1,88 @@
+export interface VideoNoteItem {
+  id: string;
+  lessonId: string;
+  trackerId: string;
+  content: string;
+  timestampSeconds: number;
+  formattedTimestamp: string;
+  isBookmarked: boolean;
+  conceptTag?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Lesson {
   id: string;
   title: string;
   durationMinutes: number;
   videoUrl: string;
+  videoId?: string;
+  thumbnail?: string;
+  playlistPosition?: number;
   keyConcepts: string[];
   practiceTask?: string;
   completed: boolean;
   completedAt?: string;
   notes?: string;
+  noteItems?: VideoNoteItem[];
+}
+
+export interface PlaylistLessonItem {
+  videoId: string;
+  title: string;
+  thumbnail: string;
+  videoUrl: string;
+  playlistPosition: number;
+  durationMinutes?: number;
+  channelTitle?: string;
+}
+
+export interface DiscoveredPlaylistCandidate {
+  playlistId: string;
+  title: string;
+  description: string;
+  channelId: string;
+  channelTitle: string;
+  thumbnail: string;
+  itemCount: number;
+  relevanceScore: number;
+  matchReasons: string[];
+  verifiedContainsVideoId: boolean;
+  lessons: PlaylistLessonItem[];
+}
+
+export type PlaylistDiscoveryStatus =
+  | 'playlist_found'
+  | 'multiple_playlists_found'
+  | 'no_playlist_found'
+  | 'invalid_url'
+  | 'error';
+
+export interface PlaylistDiscoveryResult {
+  status: PlaylistDiscoveryStatus;
+  message: string;
+  originalVideoId: string | null;
+  explicitPlaylistId: string | null;
+  videoMetadata?: {
+    videoId: string;
+    title: string;
+    description?: string;
+    channelId: string;
+    channelTitle: string;
+    thumbnail: string;
+    durationMinutes?: number;
+    topic: string;
+    category: string;
+  } | null;
+  selectedPlaylist?: DiscoveredPlaylistCandidate | null;
+  candidates?: DiscoveredPlaylistCandidate[];
+  lessons?: PlaylistLessonItem[];
+  errorCode?:
+    | 'INVALID_URL'
+    | 'PRIVATE_OR_DELETED_VIDEO'
+    | 'QUOTA_EXCEEDED'
+    | 'NO_PLAYLIST_FOUND'
+    | 'API_ERROR';
 }
 
 export interface Module {
@@ -42,6 +117,12 @@ export interface Tracker {
   studyDays: number[]; // [1, 2, 3, 4, 5, 6] (0 = Sun, 1 = Mon...)
   createdAt: string;
   modules: Module[];
+  isFavorite?: boolean;
+  isBookmarked?: boolean;
+  technologies?: string[];
+  lastWatchedLessonId?: string;
+  lastAccessedAt?: string;
+  ownerUserId?: string;
 }
 
 export interface SquadMember {
@@ -143,6 +224,8 @@ export type PacingMode =
   | 'exam-prep';
 
 export interface LearnerProfile {
+  userId?: string;
+  email?: string;
   name: string;
   role: LearnerRole;
   careerObjective: string;
@@ -151,6 +234,8 @@ export interface LearnerProfile {
   preferredTime: string; // HH:MM 24h format
   studyDays: number[]; // [0..6]
   weeklyHoursGoal: number;
+  lastActiveCourseId?: string;
+  lastActiveLessonId?: string;
 }
 
 export interface SkillMilestone {
@@ -200,3 +285,56 @@ export interface ProfileCourseAnalyticsSummary {
   pendingCourses: CourseAnalyticsItem[];
   allCourses: CourseAnalyticsItem[];
 }
+
+export type CourseSortOption = 'recently_added' | 'completion' | 'title';
+
+export interface CourseLibraryFilterOptions {
+  searchQuery?: string;
+  category?: string;
+  difficulty?: string;
+  technology?: string;
+  sortBy?: CourseSortOption;
+  onlyFavorites?: boolean;
+  onlyBookmarked?: boolean;
+}
+
+export interface ContinueLearningInfo {
+  trackerId: string;
+  trackerTitle: string;
+  category: string;
+  instructor: string;
+  lessonId: string;
+  lessonTitle: string;
+  lessonIndex: number;
+  totalLessons: number;
+  completedLessons: number;
+  pendingLessons: number;
+  progressPercent: number;
+  moduleTitle: string;
+  lastAccessedAt: string;
+}
+
+export interface WeeklyActivityDay {
+  date: string;
+  dayLabel: string;
+  minutesStudied: number;
+  lessonsCompleted: number;
+  targetMinutes: number;
+  goalMet: boolean;
+}
+
+export interface StudentDashboardSummary {
+  totalEnrolledCourses: number;
+  totalCompletedLessons: number;
+  totalPendingLessons: number;
+  totalAvailableLessons: number;
+  overallProgressPercent: number;
+  currentStreakDays: number;
+  continueLearning: ContinueLearningInfo | null;
+  recentlyAccessedCourses: ContinueLearningInfo[];
+  weeklyActivity: WeeklyActivityDay[];
+  totalWeeklyMinutes: number;
+  favoriteCoursesCount: number;
+  bookmarkedNotesCount: number;
+}
+

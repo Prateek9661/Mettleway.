@@ -20,21 +20,28 @@ import {
   Shield,
   Briefcase,
   Target,
+  ChevronLeft,
+  ChevronRight,
+  Youtube,
 } from 'lucide-react';
 import { Tracker, Lesson, StudyTask, LearnerProfile } from '../types';
 import { soundAlert } from '../utils/audioAlert';
 import {
   getCurrentUncompletedLesson,
+  getActiveOrSelectedLesson,
   calculateCourseProgress,
   generateDailyStudyChecklist,
   filterStudyTasks,
   getCourseThemeTokens,
   resolveLessonVideoUrl,
+  resolveLessonEmbedUrl,
   computeSkillMilestones,
   createDefaultLearnerProfile,
   computeProfileCourseAnalytics,
+  getContinueLearningInfoForTracker,
 } from '../utils/studyWorkspaceLogic';
 import { ConfettiCelebration } from './ConfettiCelebration';
+import { PersonalVideoNotesPanel } from './PersonalVideoNotesPanel';
 
 interface TodaySessionProps {
   activeTracker: Tracker | null;
@@ -49,6 +56,25 @@ interface TodaySessionProps {
   learnerProfile?: LearnerProfile;
   onOpenProfileModal?: () => void;
   allTrackers?: Tracker[];
+  selectedLessonId?: string | null;
+  onSelectLesson?: (lessonId: string) => void;
+  onAddVideoNote?: (params: {
+    lessonId: string;
+    content: string;
+    timestampInput: string;
+    isBookmarked: boolean;
+    conceptTag: string;
+  }) => void;
+  onUpdateVideoNote?: (params: {
+    lessonId: string;
+    noteId: string;
+    content: string;
+    timestampInput: string;
+    isBookmarked: boolean;
+    conceptTag: string;
+  }) => void;
+  onDeleteVideoNote?: (lessonId: string, noteId: string) => void;
+  onToggleBookmarkVideoNote?: (lessonId: string, noteId: string) => void;
 }
 
 export const TodaySession: React.FC<TodaySessionProps> = ({
@@ -64,6 +90,12 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   learnerProfile,
   onOpenProfileModal,
   allTrackers,
+  selectedLessonId,
+  onSelectLesson,
+  onAddVideoNote,
+  onUpdateVideoNote,
+  onDeleteVideoNote,
+  onToggleBookmarkVideoNote,
 }) => {
   const effectiveProfile = React.useMemo(
     () => learnerProfile || createDefaultLearnerProfile('Software Engineer'),
@@ -171,9 +203,46 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     } catch {}
   }, [builtInChecks, activeTracker]);
 
-  // Find next uncompleted lesson
-  const currentLesson: Lesson | null = React.useMemo(
-    () => getCurrentUncompletedLesson(activeTracker),
+  const [localSelectedLessonId, setLocalSelectedLessonId] = useState<string | null>(null);
+  const [isPlayerExpanded, setIsPlayerExpanded] = useState<boolean>(true);
+  const [seekTimestampSeconds, setSeekTimestampSeconds] = useState<number>(0);
+
+  useEffect(() => {
+    setLocalSelectedLessonId(null);
+    setSeekTimestampSeconds(0);
+  }, [activeTracker?.id, activeTracker?.sourceUrl]);
+
+  const effectiveSelectedLessonId =
+    selectedLessonId !== undefined && selectedLessonId !== null
+      ? selectedLessonId
+      : localSelectedLessonId || activeTracker?.lastWatchedLessonId || null;
+
+  const handleSelectSpecificLesson = (lessonId: string, seekSeconds: number = 0) => {
+    setLocalSelectedLessonId(lessonId);
+    setSeekTimestampSeconds(seekSeconds);
+    setIsPlayerExpanded(true);
+    if (onSelectLesson) {
+      onSelectLesson(lessonId);
+    }
+  };
+
+  // Resolve the active or user-selected lesson along with its sequential index & module title
+  const {
+    lesson: currentLesson,
+    lessonIndex: currentLessonIndex,
+    moduleTitle: currentModuleTitle,
+  } = React.useMemo(
+    () => getActiveOrSelectedLesson(activeTracker, effectiveSelectedLessonId),
+    [activeTracker, effectiveSelectedLessonId]
+  );
+
+  const continueLearningInfo = React.useMemo(
+    () => getContinueLearningInfoForTracker(activeTracker),
+    [activeTracker]
+  );
+
+  const allCourseLessons = React.useMemo(
+    () => (activeTracker ? activeTracker.modules.flatMap(m => m.lessons) : []),
     [activeTracker]
   );
 
@@ -700,17 +769,100 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
             </form>
           </div>
 
-          {/* 2. Today's Assigned Lesson & Study Notes Card */}
+          {/* Continue Learning Smart Progress Strip */}
+          {!isDeepWork && continueLearningInfo && (
+            <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+              <div className="space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-indigo-300">
+                  <span className="font-semibold">Continue Learning</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono tabular-nums">
+                    {continueLearningInfo.completedLessons} completed ·{' '}
+                    {continueLearningInfo.pendingLessons} pending (
+                    {continueLearningInfo.progressPercent}%)
+                  </span>
+                </div>
+                <p className="text-sm font-bold text-white truncate">
+                  Lecture {continueLearningInfo.lessonIndex + 1}: {continueLearningInfo.lessonTitle}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleSelectSpecificLesson(continueLearningInfo.lessonId, 0);
+                  const el = document.getElementById('active-lesson-player-card');
+                  if (el && el.scrollIntoView) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                }}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-900 bg-white hover:bg-indigo-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Play className="w-3.5 h-3.5 fill-slate-900" />
+                <span>Resume Lesson {continueLearningInfo.lessonIndex + 1}</span>
+              </button>
+            </div>
+          )}
+
+          {/* 2. Today's Assigned Lesson, Interactive Course Video Player, Playlist Sidebar & Personal Notes */}
           {currentLesson ? (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-indigo-600">
-                  Active Curriculum Lesson
-                </span>
-                <span className="text-xs text-slate-500 font-mono tabular-nums flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  {currentLesson.durationMinutes} mins lecture
-                </span>
+            <div
+              id="active-lesson-player-card"
+              className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="font-semibold uppercase tracking-wider text-indigo-600">
+                    Active Lecture ({currentLessonIndex + 1} of {allCourseLessons.length})
+                  </span>
+                  {currentModuleTitle && (
+                    <>
+                      <span aria-hidden="true" className="text-slate-300">·</span>
+                      <span className="text-slate-500 font-medium truncate max-w-xs">
+                        {currentModuleTitle}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* Sequential Prev / Next Lecture Switcher */}
+                  {allCourseLessons.length > 1 && (
+                    <div className="flex items-center gap-1 mr-1">
+                      <button
+                        type="button"
+                        disabled={currentLessonIndex <= 0}
+                        onClick={() => {
+                          const prevLesson = allCourseLessons[currentLessonIndex - 1];
+                          if (prevLesson) handleSelectSpecificLesson(prevLesson.id, 0);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                        title="Previous Lesson in Playlist"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span>Previous Lesson</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={currentLessonIndex >= allCourseLessons.length - 1}
+                        onClick={() => {
+                          const nextLesson = allCourseLessons[currentLessonIndex + 1];
+                          if (nextLesson) handleSelectSpecificLesson(nextLesson.id, 0);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                        title="Next Lesson in Playlist"
+                      >
+                        <span>Next Lesson</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  <span className="text-xs text-slate-500 font-mono tabular-nums flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5" />
+                    {currentLesson.durationMinutes} mins lecture
+                  </span>
+                </div>
               </div>
 
               <div>
@@ -728,6 +880,133 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 </div>
               </div>
 
+              {/* Interactive Embedded YouTube Player + Complete Playlist Sidebar */}
+              {(() => {
+                const embedUrl = resolveLessonEmbedUrl(
+                  activeTracker.sourceUrl,
+                  currentLesson.videoUrl,
+                  currentLessonIndex,
+                  seekTimestampSeconds
+                );
+                if (!embedUrl) return null;
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                        <Youtube className="w-4 h-4 text-rose-600" />
+                        <span>
+                          Now Playing: Lecture {currentLessonIndex + 1} — {currentLesson.title}
+                          {seekTimestampSeconds > 0 ? ` (Seeked to ${formatTime(seekTimestampSeconds)})` : ''}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsPlayerExpanded(prev => !prev)}
+                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                      >
+                        {isPlayerExpanded ? 'Hide Video Player' : 'Show Video Player'}
+                      </button>
+                    </div>
+
+                    {isPlayerExpanded && (
+                      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
+                        {/* Responsive 16:9 Embedded Video Player (8 cols on XL) */}
+                        <div className="xl:col-span-8 relative w-full aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-xs">
+                          <iframe
+                            key={`${activeTracker.id}-${currentLesson.id}-${currentLessonIndex}-${seekTimestampSeconds}`}
+                            src={embedUrl}
+                            title={`YouTube video player for ${currentLesson.title}`}
+                            className="w-full h-full border-0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowFullScreen
+                          />
+                        </div>
+
+                        {/* Complete Playlist Sidebar (4 cols on XL) */}
+                        <div className="xl:col-span-4 border border-slate-200 rounded-xl bg-slate-50/70 flex flex-col max-h-[360px] overflow-hidden">
+                          <div className="px-3.5 py-2.5 bg-white border-b border-slate-200 flex items-center justify-between text-xs">
+                            <span className="font-bold text-slate-900">
+                              Course Playlist ({courseProgress.completed}/{courseProgress.total})
+                            </span>
+                            <span className="font-mono tabular-nums text-indigo-600 font-semibold">
+                              {courseProgress.percent}% done
+                            </span>
+                          </div>
+                          <div className="divide-y divide-slate-100 overflow-y-auto flex-1">
+                            {allCourseLessons.map((item, idx) => {
+                              const isPlaying = item.id === currentLesson.id;
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`px-3 py-2.5 flex items-start gap-2.5 text-xs transition-colors ${
+                                    isPlaying
+                                      ? 'bg-indigo-50/90 text-indigo-950'
+                                      : 'hover:bg-white text-slate-700'
+                                  }`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => onToggleLesson(item.id)}
+                                    className="mt-0.5 text-slate-400 hover:text-indigo-600 cursor-pointer shrink-0"
+                                    title={
+                                      item.completed ? 'Mark lesson pending' : 'Mark lesson completed'
+                                    }
+                                    aria-label={
+                                      item.completed
+                                        ? `Mark ${item.title} pending`
+                                        : `Mark ${item.title} completed`
+                                    }
+                                  >
+                                    {item.completed ? (
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                    ) : (
+                                      <Circle className="w-4 h-4" />
+                                    )}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectSpecificLesson(item.id, 0)}
+                                    className="flex-1 text-left min-w-0 cursor-pointer space-y-0.5"
+                                  >
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span
+                                        className={`font-mono tabular-nums text-[11px] ${
+                                          isPlaying
+                                            ? 'font-bold text-indigo-600'
+                                            : 'text-slate-400'
+                                        }`}
+                                      >
+                                        {isPlaying ? `▶ Playing #${idx + 1}` : `Lecture #${idx + 1}`}
+                                      </span>
+                                      <span className="font-mono tabular-nums text-[11px] text-slate-400">
+                                        {item.durationMinutes}m
+                                      </span>
+                                    </div>
+                                    <p
+                                      className={`line-clamp-2 leading-snug ${
+                                        item.completed
+                                          ? 'line-through text-slate-400'
+                                          : isPlaying
+                                          ? 'font-bold text-indigo-950'
+                                          : 'font-medium text-slate-800'
+                                      }`}
+                                    >
+                                      {item.title}
+                                    </p>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Practice Task Callout */}
               {currentLesson.practiceTask && (
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
@@ -741,7 +1020,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 </div>
               )}
 
-              {/* Action Buttons: Watch Video + Ask Professor Mentor + Mark Completed */}
+              {/* Action Buttons: Watch Video + Ask Professor Mentor + Toggle Lesson Status + Complete Lesson */}
               <div className="flex flex-wrap items-center gap-3 pt-1">
                 <a
                   href={
@@ -750,13 +1029,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                       : resolveLessonVideoUrl(
                           activeTracker.sourceUrl,
                           currentLesson.videoUrl,
-                          activeTracker.modules
-                            .flatMap(m => m.lessons)
-                            .findIndex(l => l.id === currentLesson.id) >= 0
-                            ? activeTracker.modules
-                                .flatMap(m => m.lessons)
-                                .findIndex(l => l.id === currentLesson.id)
-                            : 0,
+                          currentLessonIndex,
                           activeTracker.title,
                           currentLesson.title
                         )
@@ -766,7 +1039,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                   className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Watch YouTube Lecture</span>
+                  <span>Watch Lecture {currentLessonIndex + 1} on YouTube</span>
                 </a>
 
                 <button
@@ -780,27 +1053,68 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
 
                 <button
                   type="button"
+                  onClick={() => onToggleLesson(currentLesson.id)}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer ${
+                    currentLesson.completed
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <CheckCircle2
+                    className={`w-3.5 h-3.5 ${
+                      currentLesson.completed ? 'text-emerald-600' : 'text-slate-400'
+                    }`}
+                  />
+                  <span>
+                    {currentLesson.completed ? 'Completed (Click to Undo)' : 'Mark Completed'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleMarkComplete}
                   className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-xs cursor-pointer sm:ml-auto"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Complete Lesson & Log Streak</span>
+                  <span>Complete Lesson &amp; Log Streak</span>
                 </button>
               </div>
 
-              {/* Study Notes text area */}
+              {/* Quick Session Takeaways (Saved on Completion) */}
               <div className="pt-3 border-t border-slate-100">
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Quick Lesson Notes & Key Formulas (Saved on completion):
+                  Quick Lesson Notes &amp; Key Formulas (Saved on completion):
                 </label>
                 <textarea
                   value={sessionNotes}
                   onChange={e => setSessionNotes(e.target.value)}
                   placeholder="Jot down what clicked today, dry-run examples, or edge cases to remember..."
-                  rows={3}
+                  rows={2}
                   className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none bg-slate-50/60 text-slate-900"
                 />
               </div>
+
+              {/* Personal Timestamped Video Notes & Concept Bookmarks Studio */}
+              {onAddVideoNote &&
+                onUpdateVideoNote &&
+                onDeleteVideoNote &&
+                onToggleBookmarkVideoNote && (
+                  <PersonalVideoNotesPanel
+                    tracker={activeTracker}
+                    currentLesson={currentLesson}
+                    currentLessonIndex={currentLessonIndex}
+                    elapsedSessionSeconds={Math.max(0, targetSeconds - secondsRemaining)}
+                    onAddNote={onAddVideoNote}
+                    onUpdateNote={onUpdateVideoNote}
+                    onDeleteNote={onDeleteVideoNote}
+                    onToggleBookmarkNote={onToggleBookmarkVideoNote}
+                    onSeekToTimestamp={(secs, lessonId) => {
+                      handleSelectSpecificLesson(lessonId, secs);
+                      setToastMessage(`Jumped video player to timestamp ${formatTime(secs)}.`);
+                      setTimeout(() => setToastMessage(null), 2500);
+                    }}
+                  />
+                )}
             </div>
           ) : (
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-8 text-center space-y-3">
@@ -821,7 +1135,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                     Course Playlist Lectures ({activeTracker.title})
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Click any lesson below to open that specific lecture video or timestamp directly on YouTube.
+                    Click any lesson below to immediately load and play that specific lecture in the player above or open it on YouTube.
                   </p>
                 </div>
                 <button
@@ -834,72 +1148,88 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
               </div>
 
               <div className="divide-y divide-slate-100">
-                {activeTracker.modules
-                  .flatMap(m => m.lessons)
-                  .map((lesson, idx) => {
-                    const directHref =
-                      activeTracker.id === 'tracker-dsa-striver' ||
-                      activeTracker.id === 'tracker-fullstack-mern'
-                        ? lesson.videoUrl
-                        : resolveLessonVideoUrl(
-                            activeTracker.sourceUrl,
-                            lesson.videoUrl,
-                            idx,
-                            activeTracker.title,
-                            lesson.title
-                          );
-                    const isCurrent = currentLesson?.id === lesson.id;
+                {allCourseLessons.map((lesson, idx) => {
+                  const directHref =
+                    activeTracker.id === 'tracker-dsa-striver' ||
+                    activeTracker.id === 'tracker-fullstack-mern'
+                      ? lesson.videoUrl
+                      : resolveLessonVideoUrl(
+                          activeTracker.sourceUrl,
+                          lesson.videoUrl,
+                          idx,
+                          activeTracker.title,
+                          lesson.title
+                        );
+                  const isCurrent = currentLesson?.id === lesson.id;
 
-                    return (
-                      <div
-                        key={lesson.id}
-                        className={`py-2.5 flex items-center justify-between gap-3 text-xs ${
-                          isCurrent ? 'bg-indigo-50/50 -mx-2 px-2 rounded-lg' : ''
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <button
-                            type="button"
-                            onClick={() => onToggleLesson(lesson.id)}
-                            className="text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer shrink-0"
-                            title={lesson.completed ? 'Mark uncompleted' : 'Mark completed'}
-                          >
-                            {lesson.completed ? (
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            ) : (
-                              <Circle className="w-4 h-4" />
-                            )}
-                          </button>
-                          <span
-                            className={`truncate font-medium ${
-                              lesson.completed
-                                ? 'line-through text-slate-400'
-                                : isCurrent
-                                ? 'font-bold text-indigo-950'
-                                : 'text-slate-800'
-                            }`}
-                          >
-                            {lesson.title}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className="text-slate-400 font-mono tabular-nums hidden sm:inline">
-                            {lesson.durationMinutes}m
-                          </span>
-                          <a
-                            href={directHref}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 font-semibold transition-colors cursor-pointer"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            <span>Watch Lecture {idx + 1}</span>
-                          </a>
-                        </div>
+                  return (
+                    <div
+                      key={lesson.id}
+                      className={`py-2.5 flex items-center justify-between gap-3 text-xs transition-colors ${
+                        isCurrent
+                          ? 'bg-indigo-50/70 -mx-2 px-2 rounded-lg'
+                          : 'hover:bg-slate-50 -mx-2 px-2 rounded-lg'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => onToggleLesson(lesson.id)}
+                          className="text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer shrink-0"
+                          title={lesson.completed ? 'Mark uncompleted' : 'Mark completed'}
+                        >
+                          {lesson.completed ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          ) : (
+                            <Circle className="w-4 h-4" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSpecificLesson(lesson.id)}
+                          className={`truncate font-medium text-left cursor-pointer hover:text-indigo-600 transition-colors ${
+                            lesson.completed
+                              ? 'line-through text-slate-400'
+                              : isCurrent
+                              ? 'font-bold text-indigo-950'
+                              : 'text-slate-800'
+                          }`}
+                          title={`Click to load ${lesson.title} in the course player`}
+                        >
+                          {lesson.title}
+                        </button>
                       </div>
-                    );
-                  })}
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-slate-400 font-mono tabular-nums hidden sm:inline">
+                          {lesson.durationMinutes}m
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSpecificLesson(lesson.id)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                            isCurrent
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700'
+                          }`}
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                          <span>{isCurrent ? `Playing Lec ${idx + 1}` : `Play Lec ${idx + 1}`}</span>
+                        </button>
+                        <a
+                          href={directHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold transition-colors cursor-pointer"
+                          title={`Open Lecture ${idx + 1} on YouTube`}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span className="hidden md:inline">YouTube</span>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
