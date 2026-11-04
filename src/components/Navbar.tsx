@@ -74,7 +74,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
           ) : (
-            <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600">
+            <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
               <button
                 type="button"
                 onClick={() => setActiveTab('today')}
@@ -96,6 +96,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }`}
               >
                 Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('notes')}
+                className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
+                  activeTab === 'notes'
+                    ? 'border-indigo-600 text-slate-900 font-semibold'
+                    : 'border-transparent hover:text-slate-900 hover:border-slate-300'
+                }`}
+              >
+                My Notes
               </button>
               <button
                 type="button"
@@ -129,6 +140,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }`}
               >
                 Concept Mentor
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('profile')}
+                className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
+                  activeTab === 'profile'
+                    ? 'border-indigo-600 text-slate-900 font-semibold'
+                    : 'border-transparent hover:text-slate-900 hover:border-slate-300'
+                }`}
+              >
+                My Profile
               </button>
             </nav>
           )}
@@ -198,6 +220,13 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setActiveTab('notes')}
+              className={`px-2 py-1 whitespace-nowrap shrink-0 ${activeTab === 'notes' ? 'text-indigo-600 font-bold' : ''}`}
+            >
+              My Notes
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('library')}
               className={`px-2 py-1 whitespace-nowrap shrink-0 ${activeTab === 'library' ? 'text-indigo-600 font-bold' : ''}`}
             >
@@ -216,6 +245,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               className={`px-2 py-1 whitespace-nowrap shrink-0 ${activeTab === 'mentor' ? 'text-indigo-600 font-bold' : ''}`}
             >
               Mentor
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('profile')}
+              className={`px-2 py-1 whitespace-nowrap shrink-0 ${activeTab === 'profile' ? 'text-indigo-600 font-bold' : ''}`}
+            >
+              My Profile
             </button>
             <button
               type="button"

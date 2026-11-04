@@ -13,12 +13,19 @@ import {
   Bookmark,
   Heart,
   GraduationCap,
+  FileText,
+  User,
+  Sparkles,
+  Pencil,
 } from 'lucide-react';
 import { Tracker, DailyLogEntry, LearnerProfile } from '../types';
 import {
   computeStudentDashboardSummary,
   getCourseThemeTokens,
   inferCourseTechnologies,
+  getRecentNotesForDashboard,
+  calculateProfileCompletionReport,
+  computePersonalizedCourseRecommendations,
 } from '../utils/studyWorkspaceLogic';
 
 interface StudentDashboardViewProps {
@@ -27,12 +34,15 @@ interface StudentDashboardViewProps {
   streakDays: number;
   dailyLogs: DailyLogEntry[];
   learnerProfile: LearnerProfile;
-  onResumeCourseLesson: (trackerId: string, lessonId: string) => void;
+  onResumeCourseLesson: (trackerId: string, lessonId: string, seekSeconds?: number) => void;
   onOpenCourseLibrary: () => void;
   onOpenCreateModal: () => void;
   onOpenSyllabus: (trackerId: string) => void;
   onOpenMentor: (trackerId: string) => void;
   onLogDailyStudyActivity: (minutes: number) => void;
+  onOpenNotesLibrary?: () => void;
+  onOpenMyProfile?: () => void;
+  onOpenOnboardingWizard?: (mode: 'register' | 'onboarding') => void;
 }
 
 export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
@@ -47,9 +57,27 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   onOpenSyllabus,
   onOpenMentor,
   onLogDailyStudyActivity,
+  onOpenNotesLibrary,
+  onOpenMyProfile,
+  onOpenOnboardingWizard,
 }) => {
   const [quickLogMinutes, setQuickLogMinutes] = useState<number>(30);
   const [activityFeedback, setActivityFeedback] = useState<string | null>(null);
+
+  const recentNotes = useMemo(
+    () => getRecentNotesForDashboard(trackers, 5, learnerProfile.userId),
+    [trackers, learnerProfile.userId]
+  );
+
+  const profileCompletion = useMemo(
+    () => calculateProfileCompletionReport(learnerProfile),
+    [learnerProfile]
+  );
+
+  const personalizedRecommendations = useMemo(
+    () => computePersonalizedCourseRecommendations(learnerProfile, trackers).slice(0, 3),
+    [learnerProfile, trackers]
+  );
 
   const summary = useMemo(
     () =>
@@ -102,14 +130,34 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {onOpenMyProfile && (
+            <button
+              type="button"
+              onClick={onOpenMyProfile}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <User className="w-4 h-4 text-indigo-600" />
+              <span>My Profile ({profileCompletion.percentage}%)</span>
+            </button>
+          )}
+          {onOpenNotesLibrary && (
+            <button
+              type="button"
+              onClick={onOpenNotesLibrary}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <FileText className="w-4 h-4 text-indigo-600" />
+              <span>My Notes ({recentNotes.length})</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onOpenCourseLibrary}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
             <Library className="w-4 h-4 text-indigo-600" />
-            <span>Browse Course Library ({summary.totalEnrolledCourses})</span>
+            <span>Course Library ({summary.totalEnrolledCourses})</span>
           </button>
           <button
             type="button"
@@ -524,6 +572,173 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      </div>
+
+      {/* Bottom 2-Column Split: Left (Recent Notes Widget — FEATURE 5) | Right (Personalized Profile & Recommendations) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Recent Notes Widget (7 cols) */}
+        <div
+          id="dashboard-recent-notes-widget"
+          className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 space-y-4"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-indigo-600" />
+                <span>Recent Notes Across Your Courses</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Recently edited lecture notes with their associated course, lecture, timestamp, and quick access to continue editing.
+              </p>
+            </div>
+            {onOpenNotesLibrary && (
+              <button
+                type="button"
+                onClick={onOpenNotesLibrary}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                Open My Notes Library &rarr;
+              </button>
+            )}
+          </div>
+
+          {recentNotes.length === 0 ? (
+            <div className="p-6 text-center bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
+              <p className="text-xs font-semibold text-slate-700">
+                No personal video notes created yet
+              </p>
+              <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                Open any video lecture to write timestamped notes, headings, tags, or code snippets. They will automatically appear here and in My Notes.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {recentNotes.map(note => (
+                <div
+                  key={`${note.trackerId}-${note.id}`}
+                  className="py-3.5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-start justify-between gap-3"
+                >
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="font-bold text-indigo-700">{note.trackerTitle}</span>
+                      <span aria-hidden="true" className="text-slate-300">→</span>
+                      <span className="font-semibold text-slate-700 truncate max-w-xs">
+                        Lec {note.lessonIndex + 1}: {note.lessonTitle}
+                      </span>
+                      <span aria-hidden="true" className="text-slate-300">·</span>
+                      <span className="font-mono tabular-nums font-bold text-indigo-600">
+                        {note.formattedTimestamp}
+                      </span>
+                    </div>
+
+                    {note.heading && (
+                      <h3 className="text-xs font-bold text-slate-900">{note.heading}</h3>
+                    )}
+
+                    <p className="text-xs text-slate-700 line-clamp-2 leading-relaxed">
+                      {note.content}
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[11px] text-slate-400">
+                      <span>
+                        Last edited:{' '}
+                        {new Date(note.updatedAt || note.createdAt).toLocaleString([], {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      {note.tags &&
+                        note.tags.map(t => (
+                          <span
+                            key={t}
+                            className="px-1.5 py-0.5 text-[10px] font-semibold bg-indigo-50 text-indigo-700 rounded"
+                          >
+                            #{t}
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onResumeCourseLesson(
+                          note.trackerId,
+                          note.lessonId,
+                          note.timestampSeconds
+                        )
+                      }
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      <span>Continue Editing</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Personalized Profile & Recommended Tracks Widget (5 cols) */}
+        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-600" />
+                <span>Personalized For Your Profile</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Goal: {learnerProfile.careerAspiration || learnerProfile.careerObjective}
+              </p>
+            </div>
+            {onOpenOnboardingWizard && (
+              <button
+                type="button"
+                onClick={() => onOpenOnboardingWizard('onboarding')}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                Onboarding Wizard &rarr;
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {personalizedRecommendations.map(rec => (
+              <div
+                key={rec.id}
+                className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl space-y-1.5"
+              >
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-indigo-600">{rec.category}</span>
+                  <span className="font-mono tabular-nums font-bold text-emerald-700">
+                    {rec.matchScore}% Match
+                  </span>
+                </div>
+                <h3 className="text-xs font-bold text-slate-900">{rec.title}</h3>
+                <p className="text-[11px] text-slate-600">{rec.reason}</p>
+                {rec.matchedTrackerId && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = trackers.find(t => t.id === rec.matchedTrackerId);
+                        const firstLessonId = target?.modules[0]?.lessons[0]?.id || '';
+                        onResumeCourseLesson(rec.matchedTrackerId!, firstLessonId);
+                      }}
+                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
+                    >
+                      Resume Recommended Course &rarr;
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

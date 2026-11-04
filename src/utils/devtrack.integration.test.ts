@@ -1111,7 +1111,171 @@ describe('Integration Tests: Complete Learning Management Experience (Progress, 
       assert.equal(afterDelJson.data, null);
     }
   });
+
+  test('Student Onboarding + Personalized Profile + Course-Based Notes API & Row-Level Security (RLS) enforcement', async () => {
+    const baseUrl = 'http://localhost:3000';
+    let serverReachable = false;
+    try {
+      const ping = await fetch(baseUrl, { method: 'GET' });
+      serverReachable = ping.ok;
+    } catch {
+      serverReachable = false;
+    }
+
+    if (!serverReachable) return;
+
+    // 1. New Student Registration via POST /api/auth/register
+    const regRes = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Ananya Verma',
+        email: 'ananya.verma@iitd.ac.in',
+        country: 'India',
+        preferredLanguage: 'English',
+      }),
+    });
+    assert.equal(regRes.status, 200);
+    const regJson = (await regRes.json()) as any;
+    assert.equal(regJson.success, true);
+    const studentUserId = regJson.userId as string;
+    assert.ok(studentUserId);
+    assert.equal(regJson.redirectTo, 'onboarding');
+
+    // 2. Save Onboarding Profile (with optional fields skipped initially, then updated) via POST /api/profile
+    const onboardRes = await fetch(`${baseUrl}/api/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: studentUserId,
+        profile: {
+          ...regJson.profile,
+          educationLevel: "Bachelor's Degree (Undergraduate)",
+          currentDegree: 'B.Tech Computer Science',
+          collegeOrUniversity: '', // Skipped optional field
+          academicYearOrSemester: '3rd Year',
+          careerAspiration: 'Full-Stack & Distributed Systems Engineer',
+          learningInterests: ['Data Structures & Algorithms', 'System Design & Scalability'],
+          skillLevels: { 'Data Structures & Algorithms': 'Intermediate' },
+          preferredLearningFormats: ['Video Lectures & Playlists', 'Hands-On Coding & Projects'],
+          dailyMinutesTarget: 75,
+          personalLearningGoals: 'Crack SDE Internships and document lecture notes.',
+          onboardingCompleted: true,
+        },
+      }),
+    });
+    assert.equal(onboardRes.status, 200);
+
+    const getProfileRes = await fetch(
+      `${baseUrl}/api/profile?userId=${encodeURIComponent(studentUserId)}`
+    );
+    const getProfileJson = (await getProfileRes.json()) as any;
+    assert.equal(getProfileJson.success, true);
+    assert.equal(getProfileJson.profile.name, 'Ananya Verma');
+    assert.equal(getProfileJson.profile.currentDegree, 'B.Tech Computer Science');
+    assert.equal(getProfileJson.profile.onboardingCompleted, true);
+
+    // 3. Create Course-Based Personal Notes across different courses and lectures via POST /api/notes
+    const note1Res = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: studentUserId,
+        note: {
+          id: 'api-note-dsa-lec1',
+          userId: studentUserId,
+          courseId: 'tracker-dsa-striver',
+          lessonId: 'les-1',
+          heading: 'Sliding Window Template',
+          content: 'Maintain window invariant while expanding right pointer.',
+          codeSnippet: 'while (invalid) { shrinkLeft(); }',
+          codeLanguage: 'cpp',
+          timestampSeconds: 210,
+          formattedTimestamp: '03:30',
+          tags: ['Important', 'Code'],
+          isBookmarked: true,
+        },
+      }),
+    });
+    assert.equal(note1Res.status, 200);
+
+    // Upsert the same note (debounced auto-save) -> must NOT duplicate
+    const note1UpsertRes = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: studentUserId,
+        note: {
+          id: 'api-note-dsa-lec1',
+          userId: studentUserId,
+          courseId: 'tracker-dsa-striver',
+          lessonId: 'les-1',
+          heading: 'Sliding Window Master Template (Updated)',
+          content: 'Maintain window invariant while expanding right pointer in O(N).',
+          codeSnippet: 'while (invalid) { left++; }',
+          codeLanguage: 'cpp',
+          timestampSeconds: 210,
+          formattedTimestamp: '03:30',
+          tags: ['Important', 'Code', 'Interview'],
+          isBookmarked: true,
+        },
+      }),
+    });
+    assert.equal(note1UpsertRes.status, 200);
+
+    const getNotesRes = await fetch(
+      `${baseUrl}/api/notes?userId=${encodeURIComponent(studentUserId)}&courseId=tracker-dsa-striver&lessonId=les-1`
+    );
+    const getNotesJson = (await getNotesRes.json()) as any;
+    assert.equal(getNotesJson.success, true);
+    assert.equal(
+      getNotesJson.notes.filter((n: any) => n.id === 'api-note-dsa-lec1').length,
+      1,
+      'Upserting an auto-saved note must not create duplicate records'
+    );
+    assert.equal(
+      getNotesJson.notes[0].heading,
+      'Sliding Window Master Template (Updated)'
+    );
+
+    // 4. Row-Level Security (RLS) Verification: Another user cannot read, modify, or delete Ananya's note
+    const otherUserNotesRes = await fetch(
+      `${baseUrl}/api/notes?userId=intruder_user_999`
+    );
+    const otherUserNotesJson = (await otherUserNotesRes.json()) as any;
+    assert.equal(
+      otherUserNotesJson.notes.some((n: any) => n.id === 'api-note-dsa-lec1'),
+      false,
+      'Another user must not be able to read Ananya notes'
+    );
+
+    const unauthorizedDeleteRes = await fetch(
+      `${baseUrl}/api/notes/api-note-dsa-lec1`,
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'intruder_user_999' }),
+      }
+    );
+    assert.equal(
+      unauthorizedDeleteRes.status,
+      403,
+      'RLS must block another user from deleting a note they do not own'
+    );
+
+    // Owner can delete their own note
+    const authorizedDeleteRes = await fetch(
+      `${baseUrl}/api/notes/api-note-dsa-lec1`,
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: studentUserId }),
+      }
+    );
+    assert.equal(authorizedDeleteRes.status, 200);
+  });
 });
+
 
 
 

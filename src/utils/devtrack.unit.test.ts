@@ -51,6 +51,18 @@ import {
   computeStudentDashboardSummary,
   getUserScopedStorageKey,
   deleteTrackerFromList,
+  registerNewStudentProfile,
+  calculateProfileCompletionReport,
+  computePersonalizedCourseRecommendations,
+  getAllNotesAcrossTrackers,
+  groupNotesByCourseAndLecture,
+  getRecentNotesForDashboard,
+  updateNoteAcrossTrackers,
+  deleteNoteAcrossTrackers,
+  exportMultiCourseNotesToMarkdown,
+  buildFormattedRevisionPdfDocument,
+  sanitizePdfAsciiText,
+  wrapPdfTextLines,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -1176,5 +1188,358 @@ describe('Unit Tests: LMS Phase — Student Dashboard Summary, Weekly Activity &
     assert.ok(!remaining.some(t => t.id === list[0].id));
   });
 });
+
+describe('Unit Tests: Student Onboarding, Personalized Profile & Course-Based Personal Notes System (FEATURE 1-7)', () => {
+  test('1 & 2. New student registration and skipping optional onboarding questions compute accurate profile completion percentage', () => {
+    const newStudent = registerNewStudentProfile({
+      name: 'Priya Nair',
+      email: 'priya.nair@college.edu',
+      country: 'India',
+      preferredLanguage: 'English',
+      role: 'College / University Student',
+    });
+
+    assert.ok((newStudent.userId || '').startsWith('student-'));
+    assert.equal(newStudent.name, 'Priya Nair');
+    assert.equal(newStudent.email, 'priya.nair@college.edu');
+    assert.equal(newStudent.onboardingCompleted, false);
+
+    // Simulate skipping optional onboarding fields (collegeOrUniversity and academicYearOrSemester left blank)
+    const partiallyOnboarded = {
+      ...newStudent,
+      collegeOrUniversity: '',
+      academicYearOrSemester: '',
+      personalLearningGoals: '',
+      onboardingCompleted: true,
+    };
+
+    const reportPartial = calculateProfileCompletionReport(partiallyOnboarded);
+    assert.ok(reportPartial.percentage < 100);
+    assert.ok(reportPartial.missingFields.includes('College or University (Optional)'));
+    assert.ok(reportPartial.missingFields.includes('Academic Year or Semester (Optional)'));
+    assert.ok(reportPartial.missingFields.includes('Personal Learning Goals'));
+
+    // Completing all 11 onboarding fields reaches 100% completion
+    const fullyCompleted = {
+      ...partiallyOnboarded,
+      educationLevel: 'Undergraduate Degree',
+      currentDegree: 'B.Tech CSE',
+      collegeOrUniversity: 'IIT Bombay',
+      academicYearOrSemester: '3rd Year / Semester 5',
+      careerAspiration: 'Software Engineer',
+      learningInterests: ['DSA', 'DBMS & SQL'],
+      skillLevels: { DSA: 'Intermediate' as const, 'DBMS & SQL': 'Beginner' as const },
+      personalLearningGoals: ['Master DSA, DBMS, and System Design for placement interviews'],
+    };
+    const reportFull = calculateProfileCompletionReport(fullyCompleted);
+    assert.equal(reportFull.percentage, 100);
+    assert.equal(reportFull.missingFields.length, 0);
+  });
+
+  test('3. Saving and editing student profiles personalizes course recommendations and learning roadmaps', () => {
+    const profile = registerNewStudentProfile({
+      name: 'Rohan Gupta',
+      email: 'rohan@devtrack.io',
+      role: 'College / University Student',
+    });
+
+    const editedProfile = {
+      ...profile,
+      careerAspiration: 'Backend & Database Systems Engineer',
+      learningInterests: ['SQL & Database Systems (DBMS)', 'System Design & Scalability'],
+      skillLevels: {
+        'SQL & Database Systems (DBMS)': 'Intermediate' as const,
+        'System Design & Scalability': 'Beginner' as const,
+      },
+      dailyMinutesTarget: 90,
+      onboardingCompleted: true,
+    };
+
+    const recommendations = computePersonalizedCourseRecommendations(
+      editedProfile,
+      PRESET_TRACKERS
+    );
+    assert.ok(recommendations.length >= 2);
+    assert.ok(
+      recommendations.some(
+        r => r.category === 'DBMS' || r.title.toLowerCase().includes('dbms')
+      ),
+      'Should recommend DBMS track matching learningInterests'
+    );
+    assert.ok(
+      recommendations[0].matchScore >= recommendations[recommendations.length - 1].matchScore,
+      'Recommendations should be sorted by matchScore descending'
+    );
+  });
+
+  test('4, 5 & 6. Creating notes for different courses and different lectures, auto-save upsert without duplication, and reopening a lecture to retrieve existing notes', () => {
+    let courseA = structuredClone(PRESET_TRACKERS[0]); // DSA
+    let courseB = structuredClone(PRESET_TRACKERS[1]); // Web Dev
+
+    const courseALesson1 = courseA.modules[0].lessons[0].id;
+    const courseALesson2 = courseA.modules[0].lessons[1].id;
+    const courseBLesson1 = courseB.modules[0].lessons[0].id;
+
+    // Auto-save simulation on Course A, Lecture 1: typing triggers multiple saves with the SAME noteId
+    courseA = addVideoNoteToTracker(courseA, {
+      noteId: 'autosave-note-a1',
+      userId: 'user-student-1',
+      lessonId: courseALesson1,
+      heading: 'Two Pointers Draft',
+      content: 'Initial partial typing...',
+      timestampInput: '03:10',
+      isBookmarked: false,
+      conceptTag: 'Two Pointers',
+      tags: ['Important'],
+      nowIso: '2026-11-04T10:00:00.000Z',
+    });
+
+    // Debounced auto-save fires again on the same noteId -> must update in-place without duplicating
+    courseA = addVideoNoteToTracker(courseA, {
+      noteId: 'autosave-note-a1',
+      userId: 'user-student-1',
+      lessonId: courseALesson1,
+      heading: 'Two Pointers Technique & Invariant',
+      content: '• Move left pointer when sum < target\n• Move right pointer when sum > target',
+      codeSnippet: 'while (l < r) { if (a[l] + a[r] === target) return [l, r]; }',
+      codeLanguage: 'typescript',
+      timestampInput: '03:10',
+      isBookmarked: true,
+      conceptTag: 'Two Pointers',
+      tags: ['Important', 'Code', 'Interview'],
+      nowIso: '2026-11-04T10:01:00.000Z',
+    });
+
+    // Create a note on Course A, Lecture 2
+    courseA = addVideoNoteToTracker(courseA, {
+      noteId: 'note-a2',
+      userId: 'user-student-1',
+      lessonId: courseALesson2,
+      heading: 'Recursion Stack Depth',
+      content: 'Base case prevents stack overflow; space complexity is O(depth).',
+      timestampInput: '07:45',
+      isBookmarked: false,
+      conceptTag: 'Recursion',
+      tags: ['Revision', 'Exam'],
+      nowIso: '2026-11-04T10:05:00.000Z',
+    });
+
+    // Create a note on Course B, Lecture 1
+    courseB = addVideoNoteToTracker(courseB, {
+      noteId: 'note-b1',
+      userId: 'user-student-1',
+      lessonId: courseBLesson1,
+      heading: 'React Fiber Reconciliation',
+      content: 'Keys must be stable across renders to preserve component state.',
+      timestampInput: '11:20',
+      isBookmarked: true,
+      conceptTag: 'React Reconciliation',
+      tags: ['Important', 'Interview'],
+      nowIso: '2026-11-04T10:10:00.000Z',
+    });
+
+    // Reopen Course A, Lecture 1 and retrieve its existing notes
+    const reopenedLesson1Notes = searchAndFilterCourseNotes(courseA, {
+      lessonId: courseALesson1,
+    });
+    const matchingAutoSaved = reopenedLesson1Notes.filter(n => n.id === 'autosave-note-a1');
+    assert.equal(
+      matchingAutoSaved.length,
+      1,
+      'Auto-saved note must not be duplicated when saved multiple times'
+    );
+    assert.equal(matchingAutoSaved[0].heading, 'Two Pointers Technique & Invariant');
+    assert.ok(matchingAutoSaved[0].codeSnippet?.includes('while (l < r)'));
+    assert.deepEqual(matchingAutoSaved[0].tags, ['Important', 'Code', 'Interview']);
+
+    // Reopen Course A, Lecture 2 and confirm Lecture 1 notes do not leak into Lecture 2
+    const reopenedLesson2Notes = searchAndFilterCourseNotes(courseA, {
+      lessonId: courseALesson2,
+    });
+    assert.ok(reopenedLesson2Notes.some(n => n.id === 'note-a2'));
+    assert.ok(!reopenedLesson2Notes.some(n => n.id === 'autosave-note-a1'));
+  });
+
+  test('7, 8 & 9. Viewing notes from Dashboard and My Notes hierarchy (Course -> Lecture -> Notes), editing/deleting across courses, and enforcing user-specific RLS privacy', () => {
+    let trackers = structuredClone(PRESET_TRACKERS.slice(0, 2));
+    const c1Lesson = trackers[0].modules[0].lessons[0].id;
+    const c2Lesson = trackers[1].modules[0].lessons[0].id;
+
+    // User A creates a note in Course 1
+    trackers[0] = addVideoNoteToTracker(trackers[0], {
+      noteId: 'rls-note-user-a',
+      userId: 'user_alice',
+      lessonId: c1Lesson,
+      heading: 'Alice Private DSA Note',
+      content: 'Binary search mid calculation: l + ((r - l) >> 1)',
+      timestampInput: '04:00',
+      isBookmarked: true,
+      conceptTag: 'Binary Search',
+      tags: ['Formula'],
+      nowIso: '2026-11-04T14:00:00.000Z',
+    });
+
+    // User B creates a note in Course 2
+    trackers[1] = addVideoNoteToTracker(trackers[1], {
+      noteId: 'rls-note-user-b',
+      userId: 'user_bob',
+      lessonId: c2Lesson,
+      heading: 'Bob Private Web Note',
+      content: 'Use semantic HTML elements for screen readers.',
+      timestampInput: '02:30',
+      isBookmarked: false,
+      conceptTag: 'Accessibility',
+      tags: ['Important'],
+      nowIso: '2026-11-04T14:05:00.000Z',
+    });
+
+    // RLS check: User Alice only sees her own notes (plus legacy preset notes without a foreign userId)
+    const aliceNotes = getAllNotesAcrossTrackers(trackers, { userId: 'user_alice' });
+    assert.ok(aliceNotes.some(n => n.id === 'rls-note-user-a'));
+    assert.ok(
+      !aliceNotes.some(n => n.id === 'rls-note-user-b'),
+      'User Alice must NEVER see User Bob private note'
+    );
+
+    // Hierarchy check: Course -> Lecture -> Personal Notes
+    const hierarchy = groupNotesByCourseAndLecture(trackers, aliceNotes);
+    assert.ok(hierarchy.length >= 1);
+    const course1Group = hierarchy.find(g => g.courseId === trackers[0].id);
+    assert.ok(course1Group);
+    assert.ok(course1Group.lectures.some(l => l.lessonId === c1Lesson));
+
+    // Dashboard Recent Notes widget check
+    const recentForAlice = getRecentNotesForDashboard(trackers, 5, 'user_alice');
+    assert.equal(recentForAlice[0].id, 'rls-note-user-a');
+    assert.equal(recentForAlice[0].trackerTitle, trackers[0].title);
+
+    // Edit note from Centralized My Notes Library -> updates the single source of truth
+    trackers = updateNoteAcrossTrackers(trackers, {
+      trackerId: trackers[0].id,
+      lessonId: c1Lesson,
+      noteId: 'rls-note-user-a',
+      heading: 'Alice Updated Heading',
+      content: 'Updated content from My Notes Library',
+      tags: ['Formula', 'Revision'],
+    });
+
+    const afterUpdateInLecture = searchAndFilterCourseNotes(trackers[0], {
+      lessonId: c1Lesson,
+    }).find(n => n.id === 'rls-note-user-a');
+    assert.ok(afterUpdateInLecture);
+    assert.equal(afterUpdateInLecture.heading, 'Alice Updated Heading');
+    assert.equal(afterUpdateInLecture.content, 'Updated content from My Notes Library');
+
+    const mdLibrary = exportMultiCourseNotesToMarkdown(trackers, aliceNotes);
+    assert.ok(mdLibrary.includes('# DevTrack Centralized Personal Notes Library'));
+
+    // Delete note across trackers
+    trackers = deleteNoteAcrossTrackers(trackers, trackers[0].id, c1Lesson, 'rls-note-user-a');
+    const afterDelete = getAllNotesAcrossTrackers(trackers, { userId: 'user_alice' });
+    assert.ok(!afterDelete.some(n => n.id === 'rls-note-user-a'));
+  });
+
+  test('10. Exporting My Notes Library into a formatted PDF file (%PDF-1.4) for offline revision', () => {
+    let trackers = structuredClone(PRESET_TRACKERS);
+    const dsaLessonId = trackers[0].modules[0].lessons[0].id;
+    const webLessonId = trackers[1].modules[0].lessons[0].id;
+
+    trackers[0] = addVideoNoteToTracker(trackers[0], {
+      noteId: 'pdf-note-dsa-1',
+      userId: 'user_pdf_tester',
+      lessonId: dsaLessonId,
+      heading: 'Binary Search Midpoint Invariant',
+      content: 'Always compute mid = low + (high - low) / 2 to avoid 32-bit signed integer overflow.',
+      codeSnippet: 'int mid = low + (high - low) / 2;',
+      codeLanguage: 'cpp',
+      timestampInput: '05:45',
+      tags: ['Important', 'Formula', 'Exam'],
+      isBookmarked: true,
+      conceptTag: 'Binary Search',
+    });
+
+    trackers[1] = addVideoNoteToTracker(trackers[1], {
+      noteId: 'pdf-note-web-1',
+      userId: 'user_pdf_tester',
+      lessonId: webLessonId,
+      heading: 'Express Middleware Execution Order',
+      content: 'Error-handling middleware takes 4 arguments (err, req, res, next) and mounts last.',
+      codeSnippet: 'app.use((err, req, res, next) => res.status(500).json({ error: err.message }));',
+      codeLanguage: 'typescript',
+      timestampInput: '11:20',
+      tags: ['Revision', 'Code'],
+      isBookmarked: false,
+      conceptTag: 'Middleware',
+    });
+
+    const allNotes = getAllNotesAcrossTrackers(trackers, { userId: 'user_pdf_tester' });
+    assert.ok(allNotes.length >= 2);
+
+    const pdfDoc = buildFormattedRevisionPdfDocument(trackers, allNotes, {
+      documentTitle: 'Semester Exam & SDE Revision Booklet',
+      learnerName: 'Aarav Sharma',
+      learnerRole: 'B.Tech CSE (3rd Year)',
+      includeCodeSnippets: true,
+      includeTableOfContents: true,
+      includeRevisionCheckboxes: true,
+      includeTimestampsAndTags: true,
+      filterSummary: 'All Courses',
+      exportedAtIso: '2026-11-04T10:30:00.000Z',
+    });
+
+    // Verify metadata and filename
+    assert.equal(pdfDoc.title, 'Semester Exam & SDE Revision Booklet');
+    assert.equal(pdfDoc.filename, 'semester-exam-sde-revision-booklet-2026-11-04.pdf');
+    assert.ok(pdfDoc.totalCourses >= 2);
+    assert.ok(pdfDoc.totalLectures >= 2);
+    assert.equal(pdfDoc.totalNotes, allNotes.length);
+    assert.ok(pdfDoc.tableOfContents.length >= 2);
+    assert.ok(pdfDoc.pages.length >= 1);
+
+    // Verify valid %PDF-1.4 header, fonts, content stream text, xref table, and %%EOF trailer
+    assert.ok(pdfDoc.pdfString.startsWith('%PDF-1.4\n'), 'PDF must start with %PDF-1.4 header');
+    assert.ok(pdfDoc.pdfString.includes('/BaseFont /Helvetica'), 'PDF must include Helvetica font');
+    assert.ok(pdfDoc.pdfString.includes('/BaseFont /Helvetica-Bold'), 'PDF must include Helvetica-Bold font');
+    assert.ok(pdfDoc.pdfString.includes('/BaseFont /Courier'), 'PDF must include Courier font for code snippets');
+    assert.ok(
+      pdfDoc.pdfString.includes('Semester Exam & SDE Revision Booklet'),
+      'PDF content stream must include document title'
+    );
+    assert.ok(
+      pdfDoc.pdfString.includes('[ ] Binary Search Midpoint Invariant'),
+      'PDF content stream must include note heading with self-test revision checkbox'
+    );
+    assert.ok(
+      pdfDoc.pdfString.includes('int mid = low + \\(high - low\\) / 2;'),
+      'PDF content stream must escape parentheses and include code snippet'
+    );
+    assert.ok(pdfDoc.pdfString.includes('\nxref\n'), 'PDF must include cross-reference table');
+    assert.ok(pdfDoc.pdfString.trimEnd().endsWith('%%EOF'), 'PDF must end with %%EOF marker');
+    assert.ok(pdfDoc.pdfBytes instanceof Uint8Array);
+    assert.ok(pdfDoc.pdfBytes.byteLength > 1000);
+
+    // Verify toggling options (e.g., excluding code snippets and checkboxes)
+    const compactDoc = buildFormattedRevisionPdfDocument(trackers, allNotes, {
+      documentTitle: 'Compact Notes Sheet',
+      includeCodeSnippets: false,
+      includeRevisionCheckboxes: false,
+      includeTableOfContents: false,
+    });
+    assert.ok(!compactDoc.pdfString.includes('--- Code Snippet'));
+    assert.ok(!compactDoc.pdfString.includes('[ ] Binary Search Midpoint Invariant'));
+    assert.ok(compactDoc.pdfString.includes('Binary Search Midpoint Invariant'));
+
+    // Verify text wrapping and ASCII sanitization helpers
+    assert.equal(sanitizePdfAsciiText('Course → Lecture ★ Note'), 'Course -> Lecture [*] Note');
+    const wrapped = wrapPdfTextLines(
+      'This is a long sentence that should cleanly wrap across multiple lines when exported to a PDF revision sheet.',
+      35
+    );
+    assert.ok(wrapped.length >= 3);
+    assert.ok(wrapped.every(line => line.length <= 35));
+  });
+});
+
+
 
 

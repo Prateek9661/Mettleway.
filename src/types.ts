@@ -1,15 +1,35 @@
+export type NoteTag =
+  | 'Important'
+  | 'Revision'
+  | 'Exam'
+  | 'Formula'
+  | 'Interview'
+  | 'Code'
+  | 'Doubt'
+  | string;
+
+export type NoteSaveStatus = 'saved' | 'saving' | 'autosaved' | 'error' | 'unsaved';
+
 export interface VideoNoteItem {
   id: string;
+  userId?: string;
+  courseId?: string; // alias of trackerId for relational clarity
   lessonId: string;
   trackerId: string;
+  heading?: string;
   content: string;
+  codeSnippet?: string;
+  codeLanguage?: string;
   timestampSeconds: number;
   formattedTimestamp: string;
+  tags?: NoteTag[];
   isBookmarked: boolean;
   conceptTag?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+export type PersonalNoteRecord = VideoNoteItem;
 
 export interface Lesson {
   id: string;
@@ -223,19 +243,62 @@ export type PacingMode =
   | 'intensive-bootcamp'
   | 'exam-prep';
 
+export type SkillProficiency = 'Beginner' | 'Intermediate' | 'Advanced';
+export type SkillProficiencyLevel = SkillProficiency;
+
 export interface LearnerProfile {
   userId?: string;
   email?: string;
   name: string;
+  avatarUrl?: string;
+  country?: string;
+  preferredLanguage?: string;
+  educationLevel?: string;
+  currentDegree?: string;
+  collegeOrUniversity?: string; // optional
+  academicYearOrSemester?: string; // optional
   role: LearnerRole;
   careerObjective: string;
+  careerAspiration?: string;
+  learningInterests?: string[];
+  focusSkills?: string[];
+  skillLevels?: Record<string, SkillProficiency>;
+  preferredLearningFormats?: string[];
+  personalLearningGoals?: string[] | string;
   pacingMode: PacingMode;
   dailyMinutesTarget: number;
   preferredTime: string; // HH:MM 24h format
   studyDays: number[]; // [0..6]
   weeklyHoursGoal: number;
+  onboardingCompleted?: boolean;
+  onboardingCompletedAt?: string;
   lastActiveCourseId?: string;
   lastActiveLessonId?: string;
+}
+
+export interface ProfileCompletionReport {
+  percent: number;
+  percentage: number;
+  completedCount: number;
+  totalCount: number;
+  completedFields: string[];
+  missingFields: string[];
+  optionalSkippedFields: string[];
+}
+
+export interface PersonalizedCourseRecommendation {
+  id: string;
+  title: string;
+  category: string;
+  difficulty: SkillProficiency;
+  matchScore: number;
+  reason: string;
+  matchedInterests: string[];
+  recommendedPacingMinutes: number;
+  existingTrackerId?: string;
+  matchedTrackerId?: string;
+  estimatedWeeks?: string;
+  suggestedYoutubeUrl?: string;
 }
 
 export interface SkillMilestone {
@@ -337,4 +400,5 @@ export interface StudentDashboardSummary {
   favoriteCoursesCount: number;
   bookmarkedNotesCount: number;
 }
+
 

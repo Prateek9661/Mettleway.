@@ -9,7 +9,10 @@ import { CreateTrackerModal } from './components/CreateTrackerModal';
 import { LearnerProfileModal } from './components/LearnerProfileModal';
 import { StudentDashboardView } from './components/StudentDashboardView';
 import { CourseLibraryView } from './components/CourseLibraryView';
-import { Tracker, StudySquad, LearnerProfile, DailyLogEntry } from './types';
+import { StudentOnboardingModal } from './components/StudentOnboardingModal';
+import { MyProfileView } from './components/MyProfileView';
+import { MyNotesLibraryView } from './components/MyNotesLibraryView';
+import { Tracker, StudySquad, LearnerProfile, DailyLogEntry, NoteTag } from './types';
 import { PRESET_TRACKERS, INITIAL_SQUADS, INITIAL_DAILY_LOGS } from './utils/mockPresets';
 import { soundAlert } from './utils/audioAlert';
 import {
@@ -29,10 +32,14 @@ import {
   updateVideoNoteInTracker,
   deleteVideoNoteFromTracker,
   toggleBookmarkVideoNoteInTracker,
+  updateNoteAcrossTrackers,
+  deleteNoteAcrossTrackers,
   toggleTrackerFavorite,
   toggleTrackerBookmark,
   deleteTrackerFromList,
   getUserScopedStorageKey,
+  parseTimestampToSeconds,
+  formatSecondsToTimestamp,
 } from './utils/studyWorkspaceLogic';
 import {
   Bell,
@@ -47,6 +54,8 @@ import {
   Briefcase,
   Shield,
   Users,
+  UserPlus,
+  FileText,
 } from 'lucide-react';
 
 export default function App() {
@@ -140,9 +149,19 @@ export default function App() {
   // Sound mute state
   const [isMuted, setIsMuted] = useState<boolean>(() => soundAlert.isMuted);
 
-  // Create Modal state
+  // Create Modal & Onboarding Modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
+  const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState<boolean>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('onboarding') === '1') return true;
+    } catch {}
+    return false;
+  });
+  const [onboardingInitialMode, setOnboardingInitialMode] = useState<'register' | 'onboarding'>(
+    'onboarding'
+  );
 
   // Deep Work distraction-free mode state
   const [isDeepWork, setIsDeepWork] = useState<boolean>(false);
@@ -275,6 +294,34 @@ export default function App() {
         prev.map(t => (t.id === activeTrackerId ? applyProfilePacingToTracker(t, updatedProfile) : t))
       );
     }
+  };
+
+  // Complete student onboarding wizard -> save profile & redirect to personalized dashboard
+  const handleCompleteOnboarding = (completedProfile: LearnerProfile) => {
+    setLearnerProfile(completedProfile);
+    if (activeTrackerId) {
+      setTrackers(prev =>
+        prev.map(t =>
+          t.id === activeTrackerId ? applyProfilePacingToTracker(t, completedProfile) : t
+        )
+      );
+    }
+    fetch('/api/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: completedProfile.userId,
+        profile: completedProfile,
+      }),
+    }).catch(() => {});
+
+    setIsOnboardingModalOpen(false);
+    setActiveTab('dashboard');
+  };
+
+  const handleOpenOnboardingWizard = (mode: 'register' | 'onboarding' = 'onboarding') => {
+    setOnboardingInitialMode(mode);
+    setIsOnboardingModalOpen(true);
   };
 
   // Mark an entire course as 100% completed from Profile Course Analytics
@@ -452,30 +499,113 @@ export default function App() {
     );
   };
 
-  // Structured Personal Video Notes handlers
-  const handleAddVideoNote = (params: {
+  // Structured Personal Video Notes handlers (Single Source of Truth across Lecture Player, My Notes, Dashboard & /api/notes)
+  const syncNoteRecordToServer = (params: {
+    id: string;
+    courseId: string;
     lessonId: string;
+    heading?: string;
     content: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
     timestampInput: string;
     isBookmarked: boolean;
     conceptTag: string;
+    tags?: NoteTag[];
   }) => {
+    const secs = parseTimestampToSeconds(params.timestampInput);
+    fetch('/api/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: currentUserId,
+        note: {
+          id: params.id,
+          userId: currentUserId,
+          courseId: params.courseId,
+          lessonId: params.lessonId,
+          heading: params.heading || '',
+          content: params.content,
+          codeSnippet: params.codeSnippet || '',
+          codeLanguage: params.codeLanguage || 'typescript',
+          timestampSeconds: secs,
+          formattedTimestamp: formatSecondsToTimestamp(secs),
+          isBookmarked: params.isBookmarked,
+          conceptTag: params.conceptTag,
+          tags: params.tags || [],
+        },
+      }),
+    }).catch(() => {});
+  };
+
+  const handleAddVideoNote = (params: {
+    noteId?: string;
+    userId?: string;
+    lessonId: string;
+    heading?: string;
+    content: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
+    timestampInput: string;
+    isBookmarked: boolean;
+    conceptTag: string;
+    tags?: NoteTag[];
+  }) => {
+    const effectiveNoteId = params.noteId || `note-${params.lessonId}-${Date.now()}`;
     setTrackers(prev =>
-      prev.map(t => (t.id === activeTrackerId ? addVideoNoteToTracker(t, params) : t))
+      prev.map(t =>
+        t.id === activeTrackerId
+          ? addVideoNoteToTracker(t, {
+              ...params,
+              noteId: effectiveNoteId,
+              userId: currentUserId,
+            })
+          : t
+      )
     );
+    syncNoteRecordToServer({
+      id: effectiveNoteId,
+      courseId: activeTrackerId,
+      lessonId: params.lessonId,
+      heading: params.heading,
+      content: params.content,
+      codeSnippet: params.codeSnippet,
+      codeLanguage: params.codeLanguage,
+      timestampInput: params.timestampInput,
+      isBookmarked: params.isBookmarked,
+      conceptTag: params.conceptTag,
+      tags: params.tags,
+    });
   };
 
   const handleUpdateVideoNote = (params: {
     lessonId: string;
     noteId: string;
+    heading?: string;
     content: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
     timestampInput: string;
     isBookmarked: boolean;
     conceptTag: string;
+    tags?: NoteTag[];
   }) => {
     setTrackers(prev =>
       prev.map(t => (t.id === activeTrackerId ? updateVideoNoteInTracker(t, params) : t))
     );
+    syncNoteRecordToServer({
+      id: params.noteId,
+      courseId: activeTrackerId,
+      lessonId: params.lessonId,
+      heading: params.heading,
+      content: params.content,
+      codeSnippet: params.codeSnippet,
+      codeLanguage: params.codeLanguage,
+      timestampInput: params.timestampInput,
+      isBookmarked: params.isBookmarked,
+      conceptTag: params.conceptTag,
+      tags: params.tags,
+    });
   };
 
   const handleDeleteVideoNote = (lessonId: string, noteId: string) => {
@@ -484,12 +614,72 @@ export default function App() {
         t.id === activeTrackerId ? deleteVideoNoteFromTracker(t, lessonId, noteId) : t
       )
     );
+    fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUserId }),
+    }).catch(() => {});
   };
 
   const handleToggleBookmarkVideoNote = (lessonId: string, noteId: string) => {
     setTrackers(prev =>
       prev.map(t =>
         t.id === activeTrackerId ? toggleBookmarkVideoNoteInTracker(t, lessonId, noteId) : t
+      )
+    );
+  };
+
+  // Multi-course centralized note handlers (used in My Notes Library)
+  const handleUpdateNoteAcrossCourses = (params: {
+    trackerId: string;
+    lessonId: string;
+    noteId: string;
+    heading?: string;
+    content: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
+    timestampInput: string;
+    isBookmarked: boolean;
+    conceptTag: string;
+    tags?: NoteTag[];
+  }) => {
+    setTrackers(prev => updateNoteAcrossTrackers(prev, params));
+    syncNoteRecordToServer({
+      id: params.noteId,
+      courseId: params.trackerId,
+      lessonId: params.lessonId,
+      heading: params.heading,
+      content: params.content,
+      codeSnippet: params.codeSnippet,
+      codeLanguage: params.codeLanguage,
+      timestampInput: params.timestampInput,
+      isBookmarked: params.isBookmarked,
+      conceptTag: params.conceptTag,
+      tags: params.tags,
+    });
+  };
+
+  const handleDeleteNoteAcrossCourses = (
+    trackerId: string,
+    lessonId: string,
+    noteId: string
+  ) => {
+    setTrackers(prev => deleteNoteAcrossTrackers(prev, trackerId, lessonId, noteId));
+    fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUserId }),
+    }).catch(() => {});
+  };
+
+  const handleToggleBookmarkAcrossCourses = (
+    trackerId: string,
+    lessonId: string,
+    noteId: string
+  ) => {
+    setTrackers(prev =>
+      prev.map(t =>
+        t.id === trackerId ? toggleBookmarkVideoNoteInTracker(t, lessonId, noteId) : t
       )
     );
   };
@@ -730,19 +920,42 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Learner Status: Role & Goals, Squads, Schedule, Deep Work, Streak & Sound Toggle */}
+            {/* Right Learner Status: Role & Goals, Onboarding, Squads, Schedule, Deep Work, Streak & Sound Toggle */}
             <div className="flex flex-wrap items-center gap-3.5 text-slate-600 ml-auto">
               <button
                 type="button"
-                onClick={() => setIsProfileModalOpen(true)}
+                onClick={() => setActiveTab('profile')}
                 className="flex items-center gap-1.5 text-slate-700 hover:text-indigo-600 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                title="Open Learner Profile, Course History & Goal Pacing Dashboard"
+                title="Open Personalized Student Profile & Recommendations"
               >
                 <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
-                <span>{learnerProfile.role}</span>
-                <span className="text-indigo-600 underline underline-offset-2 font-medium hidden lg:inline">
-                  (Profile)
-                </span>
+                <span>{learnerProfile.name} ({learnerProfile.role})</span>
+              </button>
+
+              <span aria-hidden="true" className="text-slate-300">·</span>
+
+              <button
+                type="button"
+                onClick={() => handleOpenOnboardingWizard('register')}
+                className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                title="Sign up a new student or launch the 4-step learner onboarding flow"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Student Onboarding</span>
+              </button>
+
+              <span aria-hidden="true" className="text-slate-300">·</span>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('notes')}
+                className={`flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'notes' ? 'text-indigo-600 font-bold' : ''
+                }`}
+                title="Open Centralized My Notes Library"
+              >
+                <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                <span>My Notes</span>
               </button>
 
               <span aria-hidden="true" className="text-slate-300">·</span>
@@ -828,10 +1041,11 @@ export default function App() {
             isDeepWork={isDeepWork}
             onToggleDeepWork={handleToggleDeepWork}
             learnerProfile={learnerProfile}
-            onOpenProfileModal={() => setIsProfileModalOpen(true)}
+            onOpenProfileModal={() => setActiveTab('profile')}
             allTrackers={trackers}
             selectedLessonId={selectedLessonId}
             onSelectLesson={lessonId => handleSelectAndRecordLesson(lessonId)}
+            onOpenNotesLibrary={() => setActiveTab('notes')}
             onAddVideoNote={handleAddVideoNote}
             onUpdateVideoNote={handleUpdateVideoNote}
             onDeleteVideoNote={handleDeleteVideoNote}
@@ -862,6 +1076,48 @@ export default function App() {
               setActiveTab('mentor');
             }}
             onLogDailyStudyActivity={mins => handleLogDailyStudyActivity(mins, 0)}
+            onOpenNotesLibrary={() => setActiveTab('notes')}
+            onOpenMyProfile={() => setActiveTab('profile')}
+            onOpenOnboardingWizard={mode => handleOpenOnboardingWizard(mode)}
+          />
+        )}
+
+        {activeTab === 'notes' && (
+          <MyNotesLibraryView
+            trackers={trackers}
+            userId={currentUserId}
+            learnerName={learnerProfile.name}
+            learnerRole={learnerProfile.currentDegree || learnerProfile.role}
+            onOpenCourseAndLecture={(trackerId, lessonId) => {
+              setActiveTrackerId(trackerId);
+              if (lessonId) {
+                handleSelectAndRecordLesson(lessonId, trackerId);
+              }
+              setActiveTab('today');
+            }}
+            onUpdateNoteAcrossCourses={handleUpdateNoteAcrossCourses}
+            onDeleteNoteAcrossCourses={handleDeleteNoteAcrossCourses}
+            onToggleBookmarkAcrossCourses={handleToggleBookmarkAcrossCourses}
+          />
+        )}
+
+        {activeTab === 'profile' && (
+          <MyProfileView
+            profile={learnerProfile}
+            trackers={trackers}
+            activeTrackerId={activeTracker?.id || ''}
+            onSaveProfile={handleSaveProfile}
+            onOpenOnboardingWizard={mode => handleOpenOnboardingWizard(mode)}
+            onResumeOrSelectCourse={(trackerId, lessonId) => {
+              setActiveTrackerId(trackerId);
+              if (lessonId) {
+                handleSelectAndRecordLesson(lessonId, trackerId);
+              }
+              setActiveTab('today');
+            }}
+            onOpenCreateCourseModal={() => setIsCreateModalOpen(true)}
+            onMarkCourseCompleted={handleMarkCourseCompleted}
+            onResetCourseToPending={handleResetCourseToPending}
           />
         )}
 
@@ -933,6 +1189,15 @@ export default function App() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSaveTracker={handleSaveTracker}
+      />
+
+      {/* Multi-Step Student Onboarding & Registration Modal */}
+      <StudentOnboardingModal
+        isOpen={isOnboardingModalOpen}
+        onClose={() => setIsOnboardingModalOpen(false)}
+        currentProfile={learnerProfile}
+        initialMode={onboardingInitialMode}
+        onCompleteOnboarding={handleCompleteOnboarding}
       />
 
       {/* Universal Learner Profile, Course Tracking & Flexible Goal Pacing Modal */}

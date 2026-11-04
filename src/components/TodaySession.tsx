@@ -58,20 +58,31 @@ interface TodaySessionProps {
   allTrackers?: Tracker[];
   selectedLessonId?: string | null;
   onSelectLesson?: (lessonId: string) => void;
+  onOpenNotesLibrary?: () => void;
   onAddVideoNote?: (params: {
+    noteId?: string;
+    userId?: string;
     lessonId: string;
+    heading?: string;
     content: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
     timestampInput: string;
     isBookmarked: boolean;
     conceptTag: string;
+    tags?: import('../types').NoteTag[];
   }) => void;
   onUpdateVideoNote?: (params: {
     lessonId: string;
     noteId: string;
+    heading?: string;
     content: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
     timestampInput: string;
     isBookmarked: boolean;
     conceptTag: string;
+    tags?: import('../types').NoteTag[];
   }) => void;
   onDeleteVideoNote?: (lessonId: string, noteId: string) => void;
   onToggleBookmarkVideoNote?: (lessonId: string, noteId: string) => void;
@@ -92,6 +103,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   allTrackers,
   selectedLessonId,
   onSelectLesson,
+  onOpenNotesLibrary,
   onAddVideoNote,
   onUpdateVideoNote,
   onDeleteVideoNote,
@@ -1104,10 +1116,12 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                     currentLesson={currentLesson}
                     currentLessonIndex={currentLessonIndex}
                     elapsedSessionSeconds={Math.max(0, targetSeconds - secondsRemaining)}
+                    userId={effectiveProfile.userId}
                     onAddNote={onAddVideoNote}
                     onUpdateNote={onUpdateVideoNote}
                     onDeleteNote={onDeleteVideoNote}
                     onToggleBookmarkNote={onToggleBookmarkVideoNote}
+                    onOpenNotesLibrary={onOpenNotesLibrary}
                     onSeekToTimestamp={(secs, lessonId) => {
                       handleSelectSpecificLesson(lessonId, secs);
                       setToastMessage(`Jumped video player to timestamp ${formatTime(secs)}.`);

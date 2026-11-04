@@ -18,12 +18,18 @@ import {
   WeeklyActivityDay,
   StudentDashboardSummary,
   DailyLogEntry,
+  NoteTag,
+  SkillProficiency,
+  ProfileCompletionReport,
+  PersonalizedCourseRecommendation,
 } from '../types';
 
 export type NavTab =
   | 'today'
   | 'dashboard'
   | 'library'
+  | 'notes'
+  | 'profile'
   | 'curriculum'
   | 'mentor'
   | 'squads'
@@ -2139,6 +2145,11 @@ export const LEARNER_ROLE_OPTIONS: LearnerRoleOption[] = [
   },
 ];
 
+export const LEARNER_ROLES = LEARNER_ROLE_OPTIONS.map(r => ({
+  ...r,
+  label: r.role,
+}));
+
 export interface PacingPresetConfig {
   mode: PacingMode;
   label: string;
@@ -2203,14 +2214,43 @@ export function createDefaultLearnerProfile(role: LearnerRole = 'Software Engine
   );
 
   return {
+    userId: 'default-learner',
+    email: 'alex.rivera@devtrack.edu',
     name: 'Alex Rivera',
+    avatarUrl: '/src/assets/images/avatar_student_alex_1793187697984.jpg',
+    country: 'India',
+    preferredLanguage: 'English',
+    educationLevel: 'Undergraduate Degree',
+    currentDegree: 'B.Tech in Computer Science & Engineering',
+    collegeOrUniversity: 'National Institute of Technology',
+    academicYearOrSemester: '3rd Year (Semester 5)',
     role: roleConfig.role,
     careerObjective: roleConfig.defaultObjective,
+    careerAspiration: 'Senior Full-Stack & Distributed Systems Engineer',
+    learningInterests: ['DSA', 'System Design', 'Web Development', 'DBMS & SQL'],
+    skillLevels: {
+      DSA: 'Intermediate',
+      'Web Development': 'Intermediate',
+      'System Design': 'Beginner',
+      'DBMS & SQL': 'Intermediate',
+    },
+    preferredLearningFormats: [
+      'Video Lectures',
+      'Hands-On Coding',
+      'Timestamped Notes',
+      'AI Concept Mentor Q&A',
+    ],
+    personalLearningGoals: [
+      'Complete 1 structured lecture every weekday evening',
+      'Build searchable revision notes for technical interviews',
+      'Finish full-stack and system design tracks this semester',
+    ],
     pacingMode: pacingConfig.mode,
     dailyMinutesTarget: pacingConfig.dailyMinutesTarget,
     preferredTime: pacingConfig.preferredTime,
     studyDays: [...pacingConfig.studyDays],
     weeklyHoursGoal,
+    onboardingCompleted: true,
   };
 }
 
@@ -2682,12 +2722,19 @@ export function getStructuredNotesForLesson(
 
 /**
  * Adds a timestamp-based personal note to a specific lesson in a Tracker.
+ * If a note with the same `noteId` already exists on that lesson (e.g. during debounced auto-save),
+ * it updates the existing note record in place to prevent duplicate note records.
  */
 export function addVideoNoteToTracker(
   tracker: Tracker,
   params: {
     lessonId: string;
     content: string;
+    heading?: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
+    tags?: NoteTag[];
+    userId?: string;
     timestampInput?: string | number;
     isBookmarked?: boolean;
     conceptTag?: string;
@@ -2696,11 +2743,16 @@ export function addVideoNoteToTracker(
   }
 ): Tracker {
   const trimmedContent = (params.content || '').trim();
-  if (!trimmedContent) return tracker;
+  const trimmedHeading = (params.heading || '').trim();
+  const trimmedCode = (params.codeSnippet || '').trim();
+  if (!trimmedContent && !trimmedHeading && !trimmedCode) return tracker;
 
   const timestampSeconds = parseTimestampToSeconds(params.timestampInput);
   const formattedTimestamp = formatSecondsToTimestamp(timestampSeconds);
   const nowIso = params.nowIso || new Date().toISOString();
+  const normalizedTags = Array.isArray(params.tags)
+    ? Array.from(new Set(params.tags.map(t => String(t).trim()).filter(Boolean)))
+    : [];
 
   return {
     ...tracker,
@@ -2709,21 +2761,65 @@ export function addVideoNoteToTracker(
       lessons: mod.lessons.map(les => {
         if (les.id !== params.lessonId) return les;
         const existingItems = getStructuredNotesForLesson(les, tracker.id);
-        const newNote: VideoNoteItem = {
-          id: params.noteId || `vnote-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          lessonId: les.id,
-          trackerId: tracker.id,
-          content: trimmedContent,
-          timestampSeconds,
-          formattedTimestamp,
-          isBookmarked: Boolean(params.isBookmarked),
-          conceptTag: (params.conceptTag || les.keyConcepts?.[0] || 'Core Concept').trim(),
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        };
-        const updatedItems = [...existingItems, newNote].sort(
-          (a, b) => a.timestampSeconds - b.timestampSeconds
-        );
+        const targetId =
+          params.noteId || `vnote-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+        const alreadyExists = existingItems.some(item => item.id === targetId);
+        let updatedItems: VideoNoteItem[];
+
+        if (alreadyExists) {
+          updatedItems = existingItems
+            .map(item =>
+              item.id === targetId
+                ? {
+                    ...item,
+                    userId: params.userId || item.userId || tracker.ownerUserId || 'default-learner',
+                    courseId: tracker.id,
+                    trackerId: tracker.id,
+                    heading: trimmedHeading || undefined,
+                    content: trimmedContent || trimmedHeading || 'Code note',
+                    codeSnippet: trimmedCode || undefined,
+                    codeLanguage: trimmedCode ? params.codeLanguage || item.codeLanguage || 'cpp' : undefined,
+                    timestampSeconds,
+                    formattedTimestamp,
+                    tags: normalizedTags,
+                    isBookmarked:
+                      params.isBookmarked !== undefined ? Boolean(params.isBookmarked) : item.isBookmarked,
+                    conceptTag: (
+                      params.conceptTag ||
+                      item.conceptTag ||
+                      les.keyConcepts?.[0] ||
+                      'Core Concept'
+                    ).trim(),
+                    updatedAt: nowIso,
+                  }
+                : item
+            )
+            .sort((a, b) => a.timestampSeconds - b.timestampSeconds);
+        } else {
+          const newNote: VideoNoteItem = {
+            id: targetId,
+            userId: params.userId || tracker.ownerUserId || 'default-learner',
+            courseId: tracker.id,
+            lessonId: les.id,
+            trackerId: tracker.id,
+            heading: trimmedHeading || undefined,
+            content: trimmedContent || trimmedHeading || 'Code note',
+            codeSnippet: trimmedCode || undefined,
+            codeLanguage: trimmedCode ? params.codeLanguage || 'cpp' : undefined,
+            timestampSeconds,
+            formattedTimestamp,
+            tags: normalizedTags,
+            isBookmarked: Boolean(params.isBookmarked),
+            conceptTag: (params.conceptTag || les.keyConcepts?.[0] || 'Core Concept').trim(),
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          };
+          updatedItems = [...existingItems, newNote].sort(
+            (a, b) => a.timestampSeconds - b.timestampSeconds
+          );
+        }
+
         return {
           ...les,
           noteItems: updatedItems,
@@ -2743,6 +2839,10 @@ export function updateVideoNoteInTracker(
     lessonId: string;
     noteId: string;
     content: string;
+    heading?: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
+    tags?: NoteTag[];
     timestampInput?: string | number;
     isBookmarked?: boolean;
     conceptTag?: string;
@@ -2750,7 +2850,9 @@ export function updateVideoNoteInTracker(
   }
 ): Tracker {
   const trimmedContent = (params.content || '').trim();
-  if (!trimmedContent) return tracker;
+  const trimmedHeading = params.heading !== undefined ? params.heading.trim() : undefined;
+  const trimmedCode = params.codeSnippet !== undefined ? params.codeSnippet.trim() : undefined;
+  if (!trimmedContent && !trimmedHeading && !trimmedCode) return tracker;
   const nowIso = params.nowIso || new Date().toISOString();
 
   return {
@@ -2767,11 +2869,22 @@ export function updateVideoNoteInTracker(
               params.timestampInput !== undefined
                 ? parseTimestampToSeconds(params.timestampInput)
                 : item.timestampSeconds;
+            const nextTags =
+              params.tags !== undefined
+                ? Array.from(new Set(params.tags.map(t => String(t).trim()).filter(Boolean)))
+                : item.tags;
             return {
               ...item,
-              content: trimmedContent,
+              courseId: tracker.id,
+              trackerId: tracker.id,
+              heading: trimmedHeading !== undefined ? trimmedHeading || undefined : item.heading,
+              content: trimmedContent || item.content,
+              codeSnippet: trimmedCode !== undefined ? trimmedCode || undefined : item.codeSnippet,
+              codeLanguage:
+                params.codeLanguage !== undefined ? params.codeLanguage : item.codeLanguage,
               timestampSeconds: nextSec,
               formattedTimestamp: formatSecondsToTimestamp(nextSec),
+              tags: nextTags,
               isBookmarked:
                 params.isBookmarked !== undefined ? params.isBookmarked : item.isBookmarked,
               conceptTag:
@@ -2848,6 +2961,8 @@ export function toggleBookmarkVideoNoteInTracker(
 }
 
 export interface EnrichedCourseNote extends VideoNoteItem {
+  trackerTitle: string;
+  trackerCategory: string;
   lessonTitle: string;
   lessonIndex: number;
   moduleTitle: string;
@@ -2863,6 +2978,7 @@ export function searchAndFilterCourseNotes(
     searchQuery?: string;
     onlyBookmarked?: boolean;
     conceptTag?: string;
+    tag?: string;
   }
 ): EnrichedCourseNote[] {
   if (!tracker) return [];
@@ -2879,6 +2995,10 @@ export function searchAndFilterCourseNotes(
       for (const note of notes) {
         results.push({
           ...note,
+          courseId: tracker.id,
+          trackerId: tracker.id,
+          trackerTitle: tracker.title,
+          trackerCategory: tracker.category,
           lessonTitle: les.title,
           lessonIndex: idx,
           moduleTitle: mod.title,
@@ -2888,13 +3008,19 @@ export function searchAndFilterCourseNotes(
   }
 
   const query = (options?.searchQuery || '').trim().toLowerCase();
-  const tagFilter = (options?.conceptTag || '').trim().toLowerCase();
+  const conceptFilter = (options?.conceptTag || '').trim().toLowerCase();
+  const tagFilter = (options?.tag || '').trim().toLowerCase();
 
   return results.filter(item => {
     if (options?.onlyBookmarked && !item.isBookmarked) return false;
-    if (tagFilter && (item.conceptTag || '').toLowerCase() !== tagFilter) return false;
+    if (conceptFilter && (item.conceptTag || '').toLowerCase() !== conceptFilter) return false;
+    if (tagFilter && tagFilter !== 'all') {
+      const itemTags = (item.tags || []).map(t => String(t).toLowerCase());
+      if (!itemTags.includes(tagFilter)) return false;
+    }
     if (query) {
-      const hay = `${item.content} ${item.conceptTag || ''} ${item.lessonTitle} ${item.formattedTimestamp}`.toLowerCase();
+      const tagsStr = (item.tags || []).join(' ');
+      const hay = `${item.heading || ''} ${item.content} ${item.codeSnippet || ''} ${item.conceptTag || ''} ${tagsStr} ${item.lessonTitle} ${item.trackerTitle} ${item.formattedTimestamp}`.toLowerCase();
       if (!hay.includes(query)) return false;
     }
     return true;
@@ -2906,11 +3032,12 @@ export function searchAndFilterCourseNotes(
  */
 export function exportCourseNotesToMarkdown(
   tracker: Tracker,
-  options?: { lessonId?: string; onlyBookmarked?: boolean }
+  options?: { lessonId?: string; onlyBookmarked?: boolean; tag?: string }
 ): string {
   const notes = searchAndFilterCourseNotes(tracker, {
     lessonId: options?.lessonId,
     onlyBookmarked: options?.onlyBookmarked,
+    tag: options?.tag,
   });
 
   const lines: string[] = [
@@ -2939,7 +3066,16 @@ export function exportCourseNotesToMarkdown(
     for (const n of lessonNotes) {
       const bookmarkBadge = n.isBookmarked ? ' [BOOKMARKED]' : '';
       const conceptBadge = n.conceptTag ? ` (${n.conceptTag})` : '';
-      lines.push(`- **[${n.formattedTimestamp}]**${bookmarkBadge}${conceptBadge}: ${n.content}`);
+      const tagsBadge = n.tags && n.tags.length > 0 ? ` [${n.tags.join(', ')}]` : '';
+      const headingPrefix = n.heading ? `**${n.heading}** — ` : '';
+      lines.push(
+        `- **[${n.formattedTimestamp}]**${bookmarkBadge}${conceptBadge}${tagsBadge}: ${headingPrefix}${n.content}`
+      );
+      if (n.codeSnippet) {
+        lines.push(`  \`\`\`${n.codeLanguage || ''}`);
+        lines.push(`  ${n.codeSnippet}`);
+        lines.push('  ```');
+      }
     }
     lines.push('');
   }
@@ -2952,11 +3088,12 @@ export function exportCourseNotesToMarkdown(
  */
 export function exportCourseNotesToJson(
   tracker: Tracker,
-  options?: { lessonId?: string; onlyBookmarked?: boolean }
+  options?: { lessonId?: string; onlyBookmarked?: boolean; tag?: string }
 ): string {
   const notes = searchAndFilterCourseNotes(tracker, {
     lessonId: options?.lessonId,
     onlyBookmarked: options?.onlyBookmarked,
+    tag: options?.tag,
   });
 
   return JSON.stringify(
@@ -3281,4 +3418,1234 @@ export function deleteTrackerFromList(
 ): Tracker[] {
   return (trackers || []).filter(t => t.id !== trackerIdToDelete);
 }
+
+// ============================================================================
+// 6. STUDENT ONBOARDING & PERSONALIZED PROFILE SYSTEM
+// ============================================================================
+
+export const DEFAULT_AVATAR_OPTIONS: Array<{ label: string; url: string }> = [
+  {
+    label: 'Alex (Engineering)',
+    url: '/src/assets/images/avatar_student_alex_1793187697984.jpg',
+  },
+  {
+    label: 'Priya (Backend & AI)',
+    url: '/src/assets/images/avatar_student_priya_1793187699070.jpg',
+  },
+  {
+    label: 'Marcus (Full-Stack)',
+    url: '/src/assets/images/avatar_student_marcus_1793187699902.jpg',
+  },
+];
+
+export const EDUCATION_LEVEL_OPTIONS: string[] = [
+  'Undergraduate Degree',
+  'Postgraduate / Masters',
+  'High School / Pre-University',
+  'Coding Bootcamp / Certification',
+  'Working Professional / Industry',
+  'Self-Taught / Independent Learner',
+];
+
+export const LEARNING_INTEREST_OPTIONS: string[] = [
+  'DSA',
+  'Web Development',
+  'System Design',
+  'DBMS & SQL',
+  'Python',
+  'AI & ML',
+  'Operating Systems',
+  'Computer Networks',
+  'Object-Oriented Programming',
+  'Cloud & DevOps',
+];
+
+export const LEARNING_FORMAT_OPTIONS: string[] = [
+  'Video Lectures',
+  'Hands-On Coding',
+  'Timestamped Notes',
+  'AI Concept Mentor Q&A',
+  'Project-Based Building',
+  'Peer Study Squads',
+];
+
+export const NOTE_TAG_PRESETS: NoteTag[] = [
+  'Important',
+  'Revision',
+  'Exam',
+  'Formula',
+  'Interview',
+  'Code',
+  'Doubt',
+];
+
+/**
+ * Creates a fresh student account profile for new user registration,
+ * setting `onboardingCompleted: false` so the user is redirected to the multi-step onboarding flow.
+ */
+export function registerNewStudentProfile(params: {
+  name: string;
+  email: string;
+  userId?: string;
+  role?: LearnerRole;
+  country?: string;
+  preferredLanguage?: string;
+}): LearnerProfile {
+  const cleanName = (params.name || '').trim() || 'New Student';
+  const cleanEmail =
+    (params.email || '').trim().toLowerCase() ||
+    `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@student.devtrack.io`;
+  const generatedUserId =
+    (params.userId || '').trim() ||
+    `student-${cleanEmail.replace(/[^a-z0-9]/g, '_').slice(0, 32)}-${Date.now().toString(36)}`;
+
+  const base = createDefaultLearnerProfile(params.role || 'University Student');
+  return {
+    ...base,
+    userId: generatedUserId,
+    email: cleanEmail,
+    name: cleanName,
+    avatarUrl: DEFAULT_AVATAR_OPTIONS[0].url,
+    country: (params.country || '').trim(),
+    preferredLanguage: (params.preferredLanguage || 'English').trim(),
+    educationLevel: '',
+    currentDegree: '',
+    collegeOrUniversity: '',
+    academicYearOrSemester: '',
+    careerAspiration: '',
+    careerObjective: '',
+    learningInterests: [],
+    skillLevels: {},
+    preferredLearningFormats: ['Video Lectures', 'Timestamped Notes'],
+    personalLearningGoals: [],
+    onboardingCompleted: false,
+  };
+}
+
+/**
+ * Calculates the learner's profile completion percentage and lists completed, missing, and optional fields.
+ */
+export function calculateProfileCompletionReport(
+  profile: LearnerProfile | null | undefined
+): ProfileCompletionReport {
+  if (!profile) {
+    return {
+      percent: 0,
+      percentage: 0,
+      completedCount: 0,
+      totalCount: 11,
+      completedFields: [],
+      missingFields: ['Full Name', 'Country & Language', 'Education Level', 'Career Aspiration'],
+      optionalSkippedFields: ['College or University (Optional)', 'Academic Year or Semester (Optional)'],
+    };
+  }
+
+  const goalsFilled = Array.isArray(profile.personalLearningGoals)
+    ? profile.personalLearningGoals.some(g => String(g).trim().length > 0)
+    : Boolean(profile.personalLearningGoals && String(profile.personalLearningGoals).trim().length > 0);
+
+  const checks: Array<{ label: string; filled: boolean; optional?: boolean }> = [
+    {
+      label: 'Full Name & Profile Picture',
+      filled: Boolean(profile.name && profile.name.trim().length > 0),
+    },
+    {
+      label: 'Country & Preferred Language',
+      filled: Boolean(
+        (profile.country && profile.country.trim().length > 0) &&
+          (profile.preferredLanguage && profile.preferredLanguage.trim().length > 0)
+      ),
+    },
+    {
+      label: 'Education Level & Current Degree',
+      filled: Boolean(
+        (profile.educationLevel && profile.educationLevel.trim().length > 0) ||
+          (profile.currentDegree && profile.currentDegree.trim().length > 0)
+      ),
+    },
+    {
+      label: 'College or University (Optional)',
+      filled: Boolean(profile.collegeOrUniversity && profile.collegeOrUniversity.trim().length > 0),
+      optional: true,
+    },
+    {
+      label: 'Academic Year or Semester (Optional)',
+      filled: Boolean(
+        profile.academicYearOrSemester && profile.academicYearOrSemester.trim().length > 0
+      ),
+      optional: true,
+    },
+    {
+      label: 'Career Aspiration',
+      filled: Boolean(
+        (profile.careerAspiration && profile.careerAspiration.trim().length > 0) ||
+          (profile.careerObjective && profile.careerObjective.trim().length > 0)
+      ),
+    },
+    {
+      label: 'Learning Interests',
+      filled: Array.isArray(profile.learningInterests) && profile.learningInterests.length > 0,
+    },
+    {
+      label: 'Current Skill Levels',
+      filled:
+        Boolean(profile.skillLevels) && Object.keys(profile.skillLevels || {}).length > 0,
+    },
+    {
+      label: 'Preferred Learning Formats',
+      filled:
+        Array.isArray(profile.preferredLearningFormats) &&
+        profile.preferredLearningFormats.length > 0,
+    },
+    {
+      label: 'Daily Study Availability',
+      filled:
+        Number(profile.dailyMinutesTarget) > 0 &&
+        Array.isArray(profile.studyDays) &&
+        profile.studyDays.length > 0,
+    },
+    {
+      label: 'Personal Learning Goals',
+      filled: goalsFilled,
+    },
+  ];
+
+  const completedFields = checks.filter(c => c.filled).map(c => c.label);
+  const missingFields = checks.filter(c => !c.filled).map(c => c.label);
+  const optionalSkippedFields = checks.filter(c => !c.filled && c.optional).map(c => c.label);
+
+  const percent = Math.round((completedFields.length / checks.length) * 100);
+
+  return {
+    percent,
+    percentage: percent,
+    completedCount: completedFields.length,
+    totalCount: checks.length,
+    completedFields,
+    missingFields,
+    optionalSkippedFields,
+  };
+}
+
+/**
+ * Generates personalized course recommendations and learning roadmap paths
+ * using the student's profile interests, skill levels, career aspirations, and study availability.
+ */
+export function computePersonalizedCourseRecommendations(
+  profile: LearnerProfile | null | undefined,
+  existingTrackers: Tracker[] = []
+): PersonalizedCourseRecommendation[] {
+  const interests = (profile?.learningInterests || ['DSA', 'Web Development', 'System Design']).map(
+    i => i.toLowerCase()
+  );
+  const skillLevels = profile?.skillLevels || {};
+  const dailyMins = profile?.dailyMinutesTarget || 60;
+  const aspiration =
+    profile?.careerAspiration ||
+    profile?.careerObjective ||
+    'Full-Stack & Software Engineering';
+
+  const catalog: Array<{
+    id: string;
+    title: string;
+    category: string;
+    defaultDifficulty: SkillProficiency;
+    keywords: string[];
+    suggestedYoutubeUrl: string;
+  }> = [
+    {
+      id: 'rec-dsa-mastery',
+      title: "Striver's A2Z Data Structures & Algorithms Master Path",
+      category: 'DSA',
+      defaultDifficulty: 'Intermediate',
+      keywords: ['dsa', 'algorithm', 'data structure', 'c++', 'java', 'interview', 'software'],
+      suggestedYoutubeUrl:
+        'https://www.youtube.com/playlist?list=PLgUwDviBIf0oF6QL8m22w1hIDC1vJ_BHz',
+    },
+    {
+      id: 'rec-fullstack-mern',
+      title: 'Full Stack Web Development (React, Node.js & Modern Backend)',
+      category: 'Web Development',
+      defaultDifficulty: 'Intermediate',
+      keywords: ['web', 'react', 'javascript', 'typescript', 'node', 'frontend', 'full-stack', 'fullstack'],
+      suggestedYoutubeUrl:
+        'https://www.youtube.com/playlist?list=PLu71SKxNbfoBGh_8p_NS-ZAh6v7HhYqHW',
+    },
+    {
+      id: 'rec-dbms-sql',
+      title: 'Complete DBMS & SQL Query Optimization Series',
+      category: 'DBMS & SQL',
+      defaultDifficulty: 'Beginner',
+      keywords: ['dbms', 'sql', 'database', 'backend', 'data', 'semester', 'exam'],
+      suggestedYoutubeUrl:
+        'https://www.youtube.com/playlist?list=PLxCzCOWd7aiFAN6I8CuViBuCdJgiOkT2Y',
+    },
+    {
+      id: 'rec-system-design',
+      title: 'Scalable System Design & Distributed Microservices',
+      category: 'System Design',
+      defaultDifficulty: 'Advanced',
+      keywords: ['system design', 'distributed', 'cloud', 'architect', 'senior', 'backend'],
+      suggestedYoutubeUrl:
+        'https://www.youtube.com/playlist?list=PLMCXHnjXnTnvo6alSjVkgxV-VH6EPyvoX',
+    },
+    {
+      id: 'rec-python-ai',
+      title: 'Python Engineering, Automation & Applied Machine Learning',
+      category: 'AI & ML',
+      defaultDifficulty: 'Beginner',
+      keywords: ['python', 'ai', 'ml', 'machine learning', 'data science', 'automation'],
+      suggestedYoutubeUrl:
+        'https://www.youtube.com/playlist?list=PLu0W_9lII9agwh1XjRt242xIpHhPT2llg',
+    },
+    {
+      id: 'rec-os-core',
+      title: 'Operating Systems Internals, Concurrency & CPU Scheduling',
+      category: 'Operating Systems',
+      defaultDifficulty: 'Intermediate',
+      keywords: ['operating system', 'os', 'linux', 'kernel', 'cs core', 'computer science'],
+      suggestedYoutubeUrl:
+        'https://www.youtube.com/playlist?list=PLxCzCOWd7aiGz9donHRrE9I3Mwn6XdP8p',
+    },
+  ];
+
+  const recommendations: PersonalizedCourseRecommendation[] = catalog.map(item => {
+    const matchedInterests: string[] = [];
+    let score = 60;
+
+    for (const interest of profile?.learningInterests || []) {
+      const lowerInt = interest.toLowerCase();
+      if (
+        item.category.toLowerCase().includes(lowerInt) ||
+        lowerInt.includes(item.category.toLowerCase()) ||
+        item.keywords.some(k => lowerInt.includes(k) || k.includes(lowerInt))
+      ) {
+        matchedInterests.push(interest);
+        score += 18;
+      }
+    }
+
+    if (
+      item.keywords.some(k => aspiration.toLowerCase().includes(k)) &&
+      !matchedInterests.includes(item.category)
+    ) {
+      score += 12;
+      matchedInterests.push(item.category);
+    }
+
+    // Match difficulty to user's reported skill level in this subject
+    const userSkill =
+      skillLevels[item.category] ||
+      Object.entries(skillLevels).find(([k]) =>
+        item.category.toLowerCase().includes(k.toLowerCase())
+      )?.[1];
+    const effectiveDifficulty: SkillProficiency = userSkill || item.defaultDifficulty;
+
+    // Check if already enrolled in existingTrackers
+    const existing = existingTrackers.find(
+      t =>
+        t.category.toLowerCase() === item.category.toLowerCase() ||
+        t.sourceUrl.includes(item.suggestedYoutubeUrl.split('list=')[1] || '__none__')
+    );
+
+    const reason =
+      matchedInterests.length > 0
+        ? `Tailored to your interest in ${matchedInterests.join(', ')} (${effectiveDifficulty} level) toward "${aspiration}".`
+        : `Recommended core track for "${aspiration}" paced at ${dailyMins} mins/day.`;
+
+    return {
+      id: item.id,
+      title: existing ? existing.title : item.title,
+      category: item.category,
+      difficulty: effectiveDifficulty,
+      matchScore: Math.min(99, score),
+      reason,
+      matchedInterests: matchedInterests.length > 0 ? matchedInterests : [item.category],
+      recommendedPacingMinutes: dailyMins,
+      existingTrackerId: existing?.id,
+      matchedTrackerId: existing?.id,
+      estimatedWeeks: `~${Math.max(2, Math.round(360 / Math.max(30, dailyMins)))} weeks at ${dailyMins}m/day`,
+      suggestedYoutubeUrl: item.suggestedYoutubeUrl,
+    };
+  });
+
+  void interests;
+  return recommendations.sort((a, b) => b.matchScore - a.matchScore);
+}
+
+// ============================================================================
+// 7. CENTRALIZED MULTI-COURSE PERSONAL NOTES LIBRARY & DASHBOARD WIDGET
+// ============================================================================
+
+export type CentralizedNoteSortBy = 'updated_desc' | 'created_desc' | 'timestamp_asc';
+
+export interface CentralizedNoteFilterOptions {
+  courseId?: string;
+  lessonId?: string;
+  tag?: string;
+  searchQuery?: string;
+  onlyBookmarked?: boolean;
+  userId?: string;
+  sortBy?: CentralizedNoteSortBy;
+}
+
+export interface CourseLectureNotesHierarchy {
+  courseId: string;
+  courseTitle: string;
+  courseCategory: string;
+  instructor: string;
+  totalNotesInCourse: number;
+  totalNotesCount: number;
+  lectures: Array<{
+    lessonId: string;
+    lessonTitle: string;
+    lessonIndex: number;
+    moduleTitle: string;
+    notes: EnrichedCourseNote[];
+  }>;
+}
+
+/**
+ * Retrieves all personal notes across all courses without ever duplicating a note record.
+ * Every access point (Video Lecture panel, Centralized My Notes page, and Dashboard Recent Notes widget)
+ * reads from the exact same underlying note records.
+ */
+export function getAllNotesAcrossTrackers(
+  trackers: Tracker[],
+  options: CentralizedNoteFilterOptions = {}
+): EnrichedCourseNote[] {
+  const seenNoteIds = new Set<string>();
+  const allNotes: EnrichedCourseNote[] = [];
+
+  for (const tracker of trackers || []) {
+    if (options.courseId && options.courseId !== 'all' && tracker.id !== options.courseId) {
+      continue;
+    }
+
+    const courseNotes = searchAndFilterCourseNotes(tracker, {
+      lessonId: options.lessonId && options.lessonId !== 'all' ? options.lessonId : undefined,
+      searchQuery: options.searchQuery,
+      onlyBookmarked: options.onlyBookmarked,
+      tag: options.tag,
+    });
+
+    for (const note of courseNotes) {
+      if (
+        options.userId &&
+        note.userId &&
+        note.userId !== options.userId &&
+        note.userId !== 'default-learner'
+      ) {
+        continue;
+      }
+      const uniqueKey = `${tracker.id}::${note.lessonId}::${note.id}`;
+      if (seenNoteIds.has(uniqueKey)) continue;
+      seenNoteIds.add(uniqueKey);
+      allNotes.push(note);
+    }
+  }
+
+  const sortBy: CentralizedNoteSortBy = options.sortBy || 'updated_desc';
+
+  return [...allNotes].sort((a, b) => {
+    if (sortBy === 'created_desc') {
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
+    }
+    if (sortBy === 'timestamp_asc') {
+      if (a.trackerId !== b.trackerId) return a.trackerTitle.localeCompare(b.trackerTitle);
+      if (a.lessonIndex !== b.lessonIndex) return a.lessonIndex - b.lessonIndex;
+      return a.timestampSeconds - b.timestampSeconds;
+    }
+    // Default: 'updated_desc' (Recently Edited)
+    return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '');
+  });
+}
+
+/**
+ * Organizes notes into the hierarchical structure:
+ * Course -> Lecture -> Personal Notes
+ * Accepts either (notes, trackers) or (trackers, notes) for convenience.
+ */
+export function groupNotesByCourseAndLecture(
+  firstArg: EnrichedCourseNote[] | Tracker[],
+  secondArg: Tracker[] | EnrichedCourseNote[] = []
+): CourseLectureNotesHierarchy[] {
+  const isFirstTrackers =
+    Array.isArray(firstArg) &&
+    firstArg.length > 0 &&
+    'modules' in (firstArg[0] as any);
+
+  const notes: EnrichedCourseNote[] = isFirstTrackers
+    ? (secondArg as EnrichedCourseNote[])
+    : (firstArg as EnrichedCourseNote[]);
+  const trackers: Tracker[] = isFirstTrackers
+    ? (firstArg as Tracker[])
+    : (secondArg as Tracker[]);
+
+  const courseMap = new Map<string, CourseLectureNotesHierarchy>();
+
+  for (const note of notes || []) {
+    const cId = note.courseId || note.trackerId;
+    const trackerObj = (trackers || []).find(t => t.id === cId);
+    let courseGroup = courseMap.get(cId);
+
+    if (!courseGroup) {
+      courseGroup = {
+        courseId: cId,
+        courseTitle: note.trackerTitle || trackerObj?.title || 'Course',
+        courseCategory: note.trackerCategory || trackerObj?.category || 'General',
+        instructor: trackerObj?.instructor || 'Curated Instructor',
+        totalNotesInCourse: 0,
+        totalNotesCount: 0,
+        lectures: [],
+      };
+      courseMap.set(cId, courseGroup);
+    }
+
+    courseGroup.totalNotesInCourse += 1;
+    courseGroup.totalNotesCount += 1;
+
+    let lectureGroup = courseGroup.lectures.find(l => l.lessonId === note.lessonId);
+    if (!lectureGroup) {
+      lectureGroup = {
+        lessonId: note.lessonId,
+        lessonTitle: note.lessonTitle,
+        lessonIndex: note.lessonIndex,
+        moduleTitle: note.moduleTitle,
+        notes: [],
+      };
+      courseGroup.lectures.push(lectureGroup);
+    }
+
+    if (!lectureGroup.notes.some(existing => existing.id === note.id)) {
+      lectureGroup.notes.push(note);
+    }
+  }
+
+  const result = Array.from(courseMap.values());
+  for (const c of result) {
+    c.lectures.sort((a, b) => a.lessonIndex - b.lessonIndex);
+  }
+  return result;
+}
+
+/**
+ * Returns the most recently edited notes across all courses for the Student Dashboard "Recent Notes" widget.
+ */
+export function getRecentNotesForDashboard(
+  trackers: Tracker[],
+  limit: number = 5,
+  userId?: string
+): EnrichedCourseNote[] {
+  const sorted = getAllNotesAcrossTrackers(trackers, { sortBy: 'updated_desc', userId });
+  return sorted.slice(0, Math.max(1, limit));
+}
+
+/**
+ * Updates a note across the trackers array by matching `(courseId/trackerId, lessonId, noteId)` so editing a note
+ * from the Centralized My Notes library or Dashboard updates the single source of truth.
+ */
+export function updateNoteAcrossTrackers(
+  trackers: Tracker[],
+  params: {
+    courseId?: string;
+    trackerId?: string;
+    lessonId: string;
+    noteId: string;
+    content: string;
+    heading?: string;
+    codeSnippet?: string;
+    codeLanguage?: string;
+    tags?: NoteTag[];
+    timestampInput?: string | number;
+    isBookmarked?: boolean;
+    conceptTag?: string;
+    nowIso?: string;
+  }
+): Tracker[] {
+  const targetCourseId = params.courseId || params.trackerId || '';
+  return (trackers || []).map(t =>
+    t.id === targetCourseId ? updateVideoNoteInTracker(t, params) : t
+  );
+}
+
+/**
+ * Deletes a note across the trackers array by matching `(courseId, lessonId, noteId)`.
+ */
+export function deleteNoteAcrossTrackers(
+  trackers: Tracker[],
+  courseId: string,
+  lessonId: string,
+  noteId: string
+): Tracker[] {
+  return (trackers || []).map(t =>
+    t.id === courseId ? deleteVideoNoteFromTracker(t, lessonId, noteId) : t
+  );
+}
+
+/**
+ * Exports filtered notes across multiple courses into a single Markdown document.
+ */
+export function exportMultiCourseNotesToMarkdown(
+  trackers: Tracker[],
+  optionsOrNotes: CentralizedNoteFilterOptions | EnrichedCourseNote[] = {}
+): string {
+  const notes = Array.isArray(optionsOrNotes)
+    ? optionsOrNotes
+    : getAllNotesAcrossTrackers(trackers, optionsOrNotes);
+  const hierarchy = groupNotesByCourseAndLecture(notes, trackers);
+
+  const lines: string[] = [
+    '# DevTrack Centralized Personal Notes Library',
+    `- **Total Courses with Notes:** ${hierarchy.length}`,
+    `- **Total Personal Notes Exported:** ${notes.length}`,
+    `- **Exported At:** ${new Date().toISOString()}`,
+    '',
+  ];
+
+  if (hierarchy.length === 0) {
+    lines.push('_No matching personal study notes found._');
+    return lines.join('\n');
+  }
+
+  for (const course of hierarchy) {
+    lines.push(`## Course: ${course.courseTitle} (${course.courseCategory})`);
+    for (const lec of course.lectures) {
+      lines.push(`### Lecture ${lec.lessonIndex + 1}: ${lec.lessonTitle}`);
+      for (const n of lec.notes) {
+        const tagsStr = n.tags && n.tags.length > 0 ? ` [${n.tags.join(', ')}]` : '';
+        const bookmarkStr = n.isBookmarked ? ' ★' : '';
+        const headingStr = n.heading ? `**${n.heading}** — ` : '';
+        lines.push(`- **[${n.formattedTimestamp}]**${bookmarkStr}${tagsStr}: ${headingStr}${n.content}`);
+        if (n.codeSnippet) {
+          lines.push(`  \`\`\`${n.codeLanguage || ''}`);
+          lines.push(`  ${n.codeSnippet}`);
+          lines.push('  ```');
+        }
+      }
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n');
+}
+
+// ============================================================================
+// 8. FORMATTED PDF EXPORT FOR OFFLINE REVISION (MY NOTES LIBRARY)
+// ============================================================================
+
+export interface PdfRevisionExportOptions {
+  documentTitle?: string;
+  learnerName?: string;
+  learnerRole?: string;
+  includeCodeSnippets?: boolean;
+  includeTableOfContents?: boolean;
+  includeRevisionCheckboxes?: boolean;
+  includeTimestampsAndTags?: boolean;
+  filterSummary?: string;
+  exportedAtIso?: string;
+}
+
+export interface PdfRevisionLineItem {
+  kind:
+    | 'doc_title'
+    | 'doc_subtitle'
+    | 'doc_meta'
+    | 'toc_header'
+    | 'toc_item'
+    | 'course_header'
+    | 'lecture_header'
+    | 'note_heading'
+    | 'note_meta'
+    | 'note_body'
+    | 'code_line'
+    | 'divider'
+    | 'spacer';
+  text: string;
+  font: 'Helvetica' | 'Helvetica-Bold' | 'Courier';
+  fontSize: number;
+  indent: number;
+  lineHeight: number;
+}
+
+export interface FormattedPdfRevisionDocument {
+  title: string;
+  subtitle: string;
+  filename: string;
+  exportedAtIso: string;
+  totalCourses: number;
+  totalLectures: number;
+  totalNotes: number;
+  options: Required<PdfRevisionExportOptions>;
+  tableOfContents: {
+    courseTitle: string;
+    courseCategory: string;
+    lectureCount: number;
+    noteCount: number;
+  }[];
+  courses: CourseLectureNotesHierarchy[];
+  pages: PdfRevisionLineItem[][];
+  pdfString: string;
+  pdfBytes: Uint8Array;
+}
+
+/**
+ * Normalizes Unicode symbols into clean printable WinAnsi/ASCII characters
+ * and escapes PDF literal parentheses/backslashes so standard PDF Type1 fonts
+ * (Helvetica, Helvetica-Bold, Courier) render cleanly in all offline PDF readers.
+ */
+export function sanitizePdfAsciiText(raw: string): string {
+  if (!raw) return '';
+  return String(raw)
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/→|➔|➜/g, '->')
+    .replace(/←/g, '<-')
+    .replace(/★|⭐/g, '[*]')
+    .replace(/✓|✔/g, '[x]')
+    .replace(/•|·/g, '-')
+    .replace(/—|–/g, '--')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/…/g, '...')
+    .replace(/[^\x20-\x7E\n]/g, '');
+}
+
+function escapePdfLiteralString(text: string): string {
+  return sanitizePdfAsciiText(text)
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+/**
+ * Wraps a text string into multiple lines constrained to `maxCharsPerLine`,
+ * preserving explicit newline breaks.
+ */
+export function wrapPdfTextLines(text: string, maxCharsPerLine: number = 82): string[] {
+  const sanitized = sanitizePdfAsciiText(text);
+  const rawParagraphs = sanitized.split('\n');
+  const wrapped: string[] = [];
+  const limit = Math.max(20, maxCharsPerLine);
+
+  for (const para of rawParagraphs) {
+    const trimmedRight = para.replace(/\s+$/g, '');
+    if (!trimmedRight) {
+      wrapped.push('');
+      continue;
+    }
+
+    const words = trimmedRight.split(/\s+/);
+    let currentLine = '';
+
+    for (const word of words) {
+      if (!currentLine) {
+        if (word.length > limit) {
+          for (let i = 0; i < word.length; i += limit) {
+            wrapped.push(word.slice(i, i + limit));
+          }
+        } else {
+          currentLine = word;
+        }
+      } else if (currentLine.length + 1 + word.length <= limit) {
+        currentLine += ` ${word}`;
+      } else {
+        wrapped.push(currentLine);
+        if (word.length > limit) {
+          for (let i = 0; i < word.length; i += limit) {
+            const chunk = word.slice(i, i + limit);
+            if (chunk.length === limit) {
+              wrapped.push(chunk);
+            } else {
+              currentLine = chunk;
+            }
+          }
+        } else {
+          currentLine = word;
+        }
+      }
+    }
+
+    if (currentLine) {
+      wrapped.push(currentLine);
+    }
+  }
+
+  return wrapped.length > 0 ? wrapped : [''];
+}
+
+/**
+ * Builds a structured, paginated, standards-compliant `%PDF-1.4` offline revision document
+ * from the learner's notes organized hierarchically (Course -> Lecture -> Personal Notes).
+ */
+export function buildFormattedRevisionPdfDocument(
+  trackers: Tracker[],
+  optionsOrNotes: CentralizedNoteFilterOptions | EnrichedCourseNote[] = {},
+  pdfOptions: PdfRevisionExportOptions = {}
+): FormattedPdfRevisionDocument {
+  const notes = Array.isArray(optionsOrNotes)
+    ? optionsOrNotes
+    : getAllNotesAcrossTrackers(trackers, optionsOrNotes);
+  const courses = groupNotesByCourseAndLecture(notes, trackers);
+
+  const exportedAtIso = pdfOptions.exportedAtIso || new Date().toISOString();
+  const formattedDate = exportedAtIso.slice(0, 10);
+
+  const resolvedOptions: Required<PdfRevisionExportOptions> = {
+    documentTitle:
+      (pdfOptions.documentTitle || '').trim() ||
+      'DevTrack Offline Revision Study Guide',
+    learnerName: (pdfOptions.learnerName || '').trim() || 'DevTrack Learner',
+    learnerRole: (pdfOptions.learnerRole || '').trim() || 'Software Engineering Track',
+    includeCodeSnippets:
+      pdfOptions.includeCodeSnippets !== undefined ? pdfOptions.includeCodeSnippets : true,
+    includeTableOfContents:
+      pdfOptions.includeTableOfContents !== undefined
+        ? pdfOptions.includeTableOfContents
+        : true,
+    includeRevisionCheckboxes:
+      pdfOptions.includeRevisionCheckboxes !== undefined
+        ? pdfOptions.includeRevisionCheckboxes
+        : true,
+    includeTimestampsAndTags:
+      pdfOptions.includeTimestampsAndTags !== undefined
+        ? pdfOptions.includeTimestampsAndTags
+        : true,
+    filterSummary: (pdfOptions.filterSummary || '').trim() || 'All Matching Personal Notes',
+    exportedAtIso,
+  };
+
+  const totalCourses = courses.length;
+  const totalLectures = courses.reduce((acc, c) => acc + c.lectures.length, 0);
+  const totalNotes = notes.length;
+
+  const tableOfContents = courses.map(c => ({
+    courseTitle: c.courseTitle,
+    courseCategory: c.courseCategory,
+    lectureCount: c.lectures.length,
+    noteCount: c.totalNotesCount,
+  }));
+
+  const slugTitle = resolvedOptions.documentTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'devtrack-revision-notes';
+  const filename = `${slugTitle}-${formattedDate}.pdf`;
+
+  const allLines: PdfRevisionLineItem[] = [];
+
+  // 1. Document Header Block
+  allLines.push({
+    kind: 'doc_title',
+    text: sanitizePdfAsciiText(resolvedOptions.documentTitle),
+    font: 'Helvetica-Bold',
+    fontSize: 18,
+    indent: 0,
+    lineHeight: 24,
+  });
+
+  const subtitle = `Prepared for ${resolvedOptions.learnerName} (${resolvedOptions.learnerRole})  |  Offline Revision Edition`;
+  allLines.push({
+    kind: 'doc_subtitle',
+    text: sanitizePdfAsciiText(subtitle),
+    font: 'Helvetica',
+    fontSize: 10,
+    indent: 0,
+    lineHeight: 15,
+  });
+
+  allLines.push({
+    kind: 'doc_meta',
+    text: sanitizePdfAsciiText(
+      `Summary: ${totalNotes} Note(s) across ${totalCourses} Course(s) & ${totalLectures} Lecture(s)  |  Scope: ${resolvedOptions.filterSummary}  |  Date: ${formattedDate}`
+    ),
+    font: 'Helvetica',
+    fontSize: 9,
+    indent: 0,
+    lineHeight: 14,
+  });
+
+  allLines.push({
+    kind: 'divider',
+    text: '',
+    font: 'Helvetica',
+    fontSize: 10,
+    indent: 0,
+    lineHeight: 12,
+  });
+
+  // 2. Optional Table of Contents
+  if (resolvedOptions.includeTableOfContents && tableOfContents.length > 0) {
+    allLines.push({
+      kind: 'toc_header',
+      text: 'REVISION TABLE OF CONTENTS (COURSE -> LECTURE OVERVIEW)',
+      font: 'Helvetica-Bold',
+      fontSize: 11,
+      indent: 0,
+      lineHeight: 18,
+    });
+
+    tableOfContents.forEach((item, idx) => {
+      allLines.push({
+        kind: 'toc_item',
+        text: sanitizePdfAsciiText(
+          `${idx + 1}. ${item.courseTitle} [${item.courseCategory}] -- ${item.lectureCount} lecture(s), ${item.noteCount} note(s)`
+        ),
+        font: 'Helvetica',
+        fontSize: 9.5,
+        indent: 10,
+        lineHeight: 14,
+      });
+    });
+
+    allLines.push({
+      kind: 'divider',
+      text: '',
+      font: 'Helvetica',
+      fontSize: 10,
+      indent: 0,
+      lineHeight: 14,
+    });
+  }
+
+  // 3. Empty state or Course -> Lecture -> Notes hierarchy
+  if (courses.length === 0) {
+    allLines.push({
+      kind: 'note_body',
+      text: 'No personal study notes matched the selected filters. Add notes while watching course lectures to generate your revision sheet.',
+      font: 'Helvetica',
+      fontSize: 10,
+      indent: 0,
+      lineHeight: 16,
+    });
+  } else {
+    courses.forEach((courseGroup, courseIdx) => {
+      if (courseIdx > 0) {
+        allLines.push({
+          kind: 'spacer',
+          text: '',
+          font: 'Helvetica',
+          fontSize: 10,
+          indent: 0,
+          lineHeight: 10,
+        });
+      }
+
+      allLines.push({
+        kind: 'course_header',
+        text: sanitizePdfAsciiText(
+          `COURSE ${courseIdx + 1}: ${courseGroup.courseTitle.toUpperCase()} (${courseGroup.courseCategory})`
+        ),
+        font: 'Helvetica-Bold',
+        fontSize: 12.5,
+        indent: 0,
+        lineHeight: 22,
+      });
+
+      courseGroup.lectures.forEach(lectureGroup => {
+        allLines.push({
+          kind: 'lecture_header',
+          text: sanitizePdfAsciiText(
+            `Lecture ${lectureGroup.lessonIndex + 1}: ${lectureGroup.lessonTitle}  [${lectureGroup.moduleTitle}]`
+          ),
+          font: 'Helvetica-Bold',
+          fontSize: 10.5,
+          indent: 6,
+          lineHeight: 18,
+        });
+
+        lectureGroup.notes.forEach((note, noteIdx) => {
+          const checkboxPrefix = resolvedOptions.includeRevisionCheckboxes ? '[ ] ' : '';
+          const titlePart = note.heading
+            ? note.heading
+            : `Revision Note #${noteIdx + 1}`;
+
+          allLines.push({
+            kind: 'note_heading',
+            text: sanitizePdfAsciiText(`${checkboxPrefix}${titlePart}`),
+            font: 'Helvetica-Bold',
+            fontSize: 10,
+            indent: 14,
+            lineHeight: 15,
+          });
+
+          if (resolvedOptions.includeTimestampsAndTags) {
+            const metaBadges: string[] = [`Timestamp: [${note.formattedTimestamp || '00:00'}]`];
+            if (note.isBookmarked) {
+              metaBadges.push('BOOKMARKED');
+            }
+            if (note.conceptTag) {
+              metaBadges.push(`Concept: ${note.conceptTag}`);
+            }
+            if (note.tags && note.tags.length > 0) {
+              metaBadges.push(`Tags: ${note.tags.map(t => `#${t}`).join(' ')}`);
+            }
+
+            allLines.push({
+              kind: 'note_meta',
+              text: sanitizePdfAsciiText(metaBadges.join('  |  ')),
+              font: 'Helvetica',
+              fontSize: 8.5,
+              indent: 18,
+              lineHeight: 13,
+            });
+          }
+
+          const wrappedContent = wrapPdfTextLines(note.content, 82);
+          for (const contentLine of wrappedContent) {
+            allLines.push({
+              kind: 'note_body',
+              text: contentLine,
+              font: 'Helvetica',
+              fontSize: 9.5,
+              indent: 18,
+              lineHeight: 13.5,
+            });
+          }
+
+          if (
+            resolvedOptions.includeCodeSnippets &&
+            note.codeSnippet &&
+            note.codeSnippet.trim()
+          ) {
+            const langLabel = (note.codeLanguage || 'code').toUpperCase();
+            allLines.push({
+              kind: 'code_line',
+              text: sanitizePdfAsciiText(`--- Code Snippet (${langLabel}) ---`),
+              font: 'Courier',
+              fontSize: 8.5,
+              indent: 22,
+              lineHeight: 12.5,
+            });
+
+            const wrappedCode = wrapPdfTextLines(note.codeSnippet, 76);
+            for (const codeLine of wrappedCode) {
+              allLines.push({
+                kind: 'code_line',
+                text: codeLine,
+                font: 'Courier',
+                fontSize: 8.5,
+                indent: 22,
+                lineHeight: 12,
+              });
+            }
+          }
+
+          allLines.push({
+            kind: 'spacer',
+            text: '',
+            font: 'Helvetica',
+            fontSize: 8,
+            indent: 0,
+            lineHeight: 7,
+          });
+        });
+      });
+    });
+  }
+
+  // 4. Paginate lines onto A4 pages (595.28 x 841.89 pt, top Y = 790, bottom Y = 58)
+  const PAGE_TOP_Y = 790;
+  const PAGE_BOTTOM_Y = 58;
+  const MAX_USABLE_HEIGHT = PAGE_TOP_Y - PAGE_BOTTOM_Y;
+
+  const pages: PdfRevisionLineItem[][] = [];
+  let currentPage: PdfRevisionLineItem[] = [];
+  let usedHeight = 0;
+
+  for (const line of allLines) {
+    if (usedHeight + line.lineHeight > MAX_USABLE_HEIGHT && currentPage.length > 0) {
+      pages.push(currentPage);
+      currentPage = [];
+      usedHeight = 0;
+    }
+    currentPage.push(line);
+    usedHeight += line.lineHeight;
+  }
+  if (currentPage.length > 0 || pages.length === 0) {
+    pages.push(currentPage);
+  }
+
+  // 5. Assemble standards-compliant %PDF-1.4 document with Helvetica, Helvetica-Bold, and Courier
+  // Object IDs:
+  // 1: Catalog
+  // 2: Pages
+  // 3: Font F1 (Helvetica)
+  // 4: Font F2 (Helvetica-Bold)
+  // 5: Font F3 (Courier)
+  // 6 + i*2: Page object (i = 0..pages.length-1)
+  // 7 + i*2: Page content stream object
+  const LEFT_MARGIN = 46;
+  const RIGHT_X = 549;
+
+  const objects: { id: number; body: string }[] = [];
+  const pageObjectIds: number[] = [];
+
+  pages.forEach((pageLines, pageIndex) => {
+    const pageObjId = 6 + pageIndex * 2;
+    const contentObjId = 7 + pageIndex * 2;
+    pageObjectIds.push(pageObjId);
+
+    const streamOps: string[] = [];
+    let cursorY = PAGE_TOP_Y;
+
+    // Top subtle accent bar on page 1
+    if (pageIndex === 0) {
+      streamOps.push('0.31 0.27 0.90 rg');
+      streamOps.push(`${LEFT_MARGIN} ${PAGE_TOP_Y + 14} ${RIGHT_X - LEFT_MARGIN} 3 re f`);
+      streamOps.push('0 0 0 rg');
+    }
+
+    for (const item of pageLines) {
+      cursorY -= item.lineHeight;
+
+      if (item.kind === 'divider') {
+        streamOps.push('0.82 0.85 0.90 RG');
+        streamOps.push('0.75 w');
+        streamOps.push(`${LEFT_MARGIN} ${cursorY + 4} m ${RIGHT_X} ${cursorY + 4} l S`);
+        continue;
+      }
+
+      if (item.kind === 'spacer' || !item.text) {
+        continue;
+      }
+
+      if (item.kind === 'course_header') {
+        streamOps.push('0.94 0.95 0.99 rg');
+        streamOps.push(
+          `${LEFT_MARGIN - 4} ${cursorY - 4} ${RIGHT_X - LEFT_MARGIN + 8} ${item.lineHeight - 2} re f`
+        );
+      } else if (item.kind === 'code_line') {
+        streamOps.push('0.96 0.97 0.98 rg');
+        streamOps.push(
+          `${LEFT_MARGIN + item.indent - 4} ${cursorY - 3} ${RIGHT_X - (LEFT_MARGIN + item.indent) + 4} ${item.lineHeight} re f`
+        );
+      }
+
+      const fontKey =
+        item.font === 'Helvetica-Bold'
+          ? '/F2'
+          : item.font === 'Courier'
+          ? '/F3'
+          : '/F1';
+
+      if (item.kind === 'course_header' || item.kind === 'doc_title') {
+        streamOps.push('0.12 0.16 0.36 rg');
+      } else if (item.kind === 'note_meta' || item.kind === 'doc_meta') {
+        streamOps.push('0.35 0.40 0.50 rg');
+      } else {
+        streamOps.push('0.08 0.10 0.15 rg');
+      }
+
+      const xPos = LEFT_MARGIN + item.indent;
+      const escaped = escapePdfLiteralString(item.text);
+      streamOps.push(
+        `BT ${fontKey} ${item.fontSize} Tf ${xPos.toFixed(2)} ${cursorY.toFixed(2)} Td (${escaped}) Tj ET`
+      );
+    }
+
+    // Page Footer
+    streamOps.push('0.85 0.87 0.91 RG');
+    streamOps.push('0.5 w');
+    streamOps.push(`${LEFT_MARGIN} 42 m ${RIGHT_X} 42 l S`);
+    const footerText = escapePdfLiteralString(
+      `DevTrack Offline Revision Sheet  --  Page ${pageIndex + 1} of ${pages.length}  --  Generated ${formattedDate}`
+    );
+    streamOps.push('0.40 0.45 0.54 rg');
+    streamOps.push(`BT /F1 8.5 Tf ${LEFT_MARGIN} 28 Td (${footerText}) Tj ET`);
+
+    const streamContent = streamOps.join('\n');
+    const streamByteLength = new TextEncoder().encode(streamContent).length;
+
+    objects.push({
+      id: pageObjId,
+      body: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${contentObjId} 0 R >>`,
+    });
+    objects.push({
+      id: contentObjId,
+      body: `<< /Length ${streamByteLength} >>\nstream\n${streamContent}\nendstream`,
+    });
+  });
+
+  const allObjects: { id: number; body: string }[] = [
+    {
+      id: 1,
+      body: '<< /Type /Catalog /Pages 2 0 R >>',
+    },
+    {
+      id: 2,
+      body: `<< /Type /Pages /Kids [${pageObjectIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageObjectIds.length} >>`,
+    },
+    {
+      id: 3,
+      body: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+    },
+    {
+      id: 4,
+      body: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+    },
+    {
+      id: 5,
+      body: '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>',
+    },
+    ...objects,
+  ];
+
+  allObjects.sort((a, b) => a.id - b.id);
+
+  const pdfChunks: string[] = ['%PDF-1.4\n'];
+  const offsets: number[] = [0]; // index 0 is free object
+  let runningByteOffset = new TextEncoder().encode(pdfChunks[0]).length;
+
+  for (const obj of allObjects) {
+    offsets[obj.id] = runningByteOffset;
+    const serialized = `${obj.id} 0 obj\n${obj.body}\nendobj\n`;
+    pdfChunks.push(serialized);
+    runningByteOffset += new TextEncoder().encode(serialized).length;
+  }
+
+  const xrefStartOffset = runningByteOffset;
+  const totalObjCount = allObjects.length + 1;
+  const xrefLines: string[] = [
+    'xref',
+    `0 ${totalObjCount}`,
+    '0000000000 65535 f ',
+  ];
+
+  for (let i = 1; i < totalObjCount; i++) {
+    const off = String(offsets[i] || 0).padStart(10, '0');
+    xrefLines.push(`${off} 00000 n `);
+  }
+
+  const trailerBlock = [
+    ...xrefLines,
+    'trailer',
+    `<< /Size ${totalObjCount} /Root 1 0 R >>`,
+    'startxref',
+    String(xrefStartOffset),
+    '%%EOF',
+    '',
+  ].join('\n');
+
+  pdfChunks.push(trailerBlock);
+  const pdfString = pdfChunks.join('');
+  const pdfBytes = new TextEncoder().encode(pdfString);
+
+  return {
+    title: resolvedOptions.documentTitle,
+    subtitle,
+    filename,
+    exportedAtIso,
+    totalCourses,
+    totalLectures,
+    totalNotes,
+    options: resolvedOptions,
+    tableOfContents,
+    courses,
+    pages,
+    pdfString,
+    pdfBytes,
+  };
+}
+
 

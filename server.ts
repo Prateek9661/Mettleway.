@@ -794,11 +794,302 @@ app.delete('/api/account/data', (req, res) => {
   const userId = sanitizeUserId(req.body?.userId || req.query?.userId);
   const existed = userAccountStore.has(userId);
   userAccountStore.delete(userId);
+  userProfileStore.delete(userId);
+  userNotesStore.delete(userId);
   return res.json({
     success: true,
     userId,
     deleted: existed,
     message: 'All saved learning data for this user account has been permanently deleted.',
+  });
+});
+
+// ============================================================================
+// Student Onboarding, Profile & Dedicated Personal Notes Database Store
+// (Enforces Row-Level Security / User-Specific Data Isolation per userId)
+// ============================================================================
+
+interface StoredPersonalNote {
+  id: string;
+  userId: string;
+  courseId: string;
+  trackerId: string;
+  lessonId: string;
+  heading?: string;
+  content: string;
+  codeSnippet?: string;
+  codeLanguage?: string;
+  timestampSeconds: number;
+  formattedTimestamp: string;
+  tags: string[];
+  conceptTag?: string;
+  isBookmarked: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const userProfileStore = new Map<string, any>();
+// Keyed by userId -> Map<noteId, StoredPersonalNote> for strict RLS isolation & zero duplication
+const userNotesStore = new Map<string, Map<string, StoredPersonalNote>>();
+
+// 1. Register New Student Account -> Redirects to Multi-Step Onboarding
+app.post('/api/auth/register', (req, res) => {
+  try {
+    const body = req.body || {};
+    const name = String(body.name || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
+    if (!name || !email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Full name and email are required to register a student account.',
+      });
+    }
+
+    const userId = sanitizeUserId(
+      body.userId || `student_${email.replace(/[^a-z0-9]/g, '_').slice(0, 32)}_${Date.now().toString(36)}`
+    );
+
+    const newProfile = {
+      userId,
+      email,
+      name,
+      avatarUrl:
+        body.avatarUrl || '/src/assets/images/avatar_student_alex_1793187697984.jpg',
+      role: body.role || 'University Student',
+      country: body.country || '',
+      preferredLanguage: body.preferredLanguage || 'English',
+      educationLevel: body.educationLevel || '',
+      currentDegree: body.currentDegree || '',
+      collegeOrUniversity: body.collegeOrUniversity || '',
+      academicYearOrSemester: body.academicYearOrSemester || '',
+      careerAspiration: body.careerAspiration || '',
+      careerObjective: body.careerObjective || '',
+      learningInterests: Array.isArray(body.learningInterests) ? body.learningInterests : [],
+      skillLevels: body.skillLevels && typeof body.skillLevels === 'object' ? body.skillLevels : {},
+      preferredLearningFormats: Array.isArray(body.preferredLearningFormats)
+        ? body.preferredLearningFormats
+        : ['Video Lectures', 'Timestamped Notes'],
+      personalLearningGoals: Array.isArray(body.personalLearningGoals)
+        ? body.personalLearningGoals
+        : [],
+      pacingMode: body.pacingMode || 'steady-daily',
+      dailyMinutesTarget: Number(body.dailyMinutesTarget) || 60,
+      preferredTime: body.preferredTime || '20:00',
+      studyDays: Array.isArray(body.studyDays) ? body.studyDays : [1, 2, 3, 4, 5, 6],
+      weeklyHoursGoal: Number(body.weeklyHoursGoal) || 6,
+      onboardingCompleted: Boolean(body.onboardingCompleted),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    userProfileStore.set(userId, newProfile);
+    if (!userNotesStore.has(userId)) {
+      userNotesStore.set(userId, new Map());
+    }
+
+    return res.json({
+      success: true,
+      userId,
+      redirectTo: !newProfile.onboardingCompleted ? 'onboarding' : 'dashboard',
+      redirectToOnboarding: !newProfile.onboardingCompleted,
+      profile: newProfile,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Student registration failed.',
+    });
+  }
+});
+
+// 2. Get or Save Authenticated Student Profile (Onboarding & My Profile)
+app.get('/api/profile', (req, res) => {
+  const userId = sanitizeUserId(req.query.userId);
+  const profile =
+    userProfileStore.get(userId) || userAccountStore.get(userId)?.learnerProfile || null;
+  return res.json({
+    success: true,
+    userId,
+    profile,
+  });
+});
+
+app.post('/api/profile', (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = sanitizeUserId(body.userId || body.profile?.userId);
+    const incoming = body.profile || body;
+    const existing = userProfileStore.get(userId) || {};
+
+    const updatedProfile = {
+      ...existing,
+      ...incoming,
+      userId,
+      updatedAt: new Date().toISOString(),
+    };
+    userProfileStore.set(userId, updatedProfile);
+
+    const existingSnapshot = userAccountStore.get(userId);
+    if (existingSnapshot) {
+      existingSnapshot.learnerProfile = updatedProfile;
+      existingSnapshot.updatedAt = updatedProfile.updatedAt;
+    }
+
+    return res.json({
+      success: true,
+      userId,
+      profile: updatedProfile,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to save student profile.',
+    });
+  }
+});
+
+// 3. Dedicated Personal Notes Database API with Row-Level Security (RLS) by userId
+app.get('/api/notes', (req, res) => {
+  const userId = sanitizeUserId(req.query.userId);
+  const courseId = req.query.courseId ? String(req.query.courseId).trim() : '';
+  const lessonId = req.query.lessonId ? String(req.query.lessonId).trim() : '';
+
+  const userMap = userNotesStore.get(userId);
+  let notes: StoredPersonalNote[] = userMap ? Array.from(userMap.values()) : [];
+
+  // Enforce RLS: only return notes whose userId matches the requesting userId
+  notes = notes.filter(n => n.userId === userId);
+
+  if (courseId && courseId !== 'all') {
+    notes = notes.filter(n => n.courseId === courseId || n.trackerId === courseId);
+  }
+  if (lessonId && lessonId !== 'all') {
+    notes = notes.filter(n => n.lessonId === lessonId);
+  }
+
+  notes.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+  return res.json({
+    success: true,
+    userId,
+    totalCount: notes.length,
+    notes,
+  });
+});
+
+app.post('/api/notes', (req, res) => {
+  try {
+    const rawBody = req.body || {};
+    const notePayload = rawBody.note && typeof rawBody.note === 'object' ? rawBody.note : rawBody;
+    const userId = sanitizeUserId(rawBody.userId || notePayload.userId);
+    const courseId = String(notePayload.courseId || notePayload.trackerId || rawBody.courseId || rawBody.trackerId || '').trim();
+    const lessonId = String(notePayload.lessonId || rawBody.lessonId || '').trim();
+    const content = String(notePayload.content || '').trim();
+    const heading = notePayload.heading !== undefined ? String(notePayload.heading).trim() : undefined;
+    const codeSnippet = notePayload.codeSnippet !== undefined ? String(notePayload.codeSnippet).trim() : undefined;
+
+    if (!courseId || !lessonId || (!content && !heading && !codeSnippet)) {
+      return res.status(400).json({
+        success: false,
+        error: 'courseId, lessonId, and note content are required.',
+      });
+    }
+
+    const noteId =
+      String(notePayload.id || notePayload.noteId || rawBody.id || rawBody.noteId || '').trim() ||
+      `vnote-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    // RLS check across all user maps: if noteId already exists under a different userId, reject modification
+    for (const [ownerId, ownerMap] of userNotesStore.entries()) {
+      const foreignNote = ownerMap.get(noteId);
+      if (foreignNote && (ownerId !== userId || foreignNote.userId !== userId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Row-Level Security violation: Cannot modify another user note.',
+        });
+      }
+    }
+
+    let userMap = userNotesStore.get(userId);
+    if (!userMap) {
+      userMap = new Map<string, StoredPersonalNote>();
+      userNotesStore.set(userId, userMap);
+    }
+
+    const existing = userMap.get(noteId);
+
+    const nowIso = new Date().toISOString();
+    const timestampSeconds = Math.max(0, Number(notePayload.timestampSeconds) || 0);
+    const formattedTimestamp =
+      String(notePayload.formattedTimestamp || '').trim() || '00:00';
+    const tags: string[] = Array.isArray(notePayload.tags)
+      ? Array.from(new Set(notePayload.tags.map((t: any) => String(t).trim()).filter(Boolean)))
+      : existing?.tags || [];
+
+    const savedNote: StoredPersonalNote = {
+      id: noteId,
+      userId,
+      courseId,
+      trackerId: courseId,
+      lessonId,
+      heading: heading !== undefined ? heading : existing?.heading,
+      content: content || existing?.content || heading || 'Code note',
+      codeSnippet: codeSnippet !== undefined ? codeSnippet : existing?.codeSnippet,
+      codeLanguage: notePayload.codeLanguage || existing?.codeLanguage || (codeSnippet ? 'cpp' : undefined),
+      timestampSeconds,
+      formattedTimestamp,
+      tags,
+      conceptTag: notePayload.conceptTag !== undefined ? String(notePayload.conceptTag).trim() : existing?.conceptTag,
+      isBookmarked:
+        notePayload.isBookmarked !== undefined ? Boolean(notePayload.isBookmarked) : Boolean(existing?.isBookmarked),
+      createdAt: existing?.createdAt || notePayload.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+
+    userMap.set(noteId, savedNote);
+
+    return res.json({
+      success: true,
+      userId,
+      note: savedNote,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to save personal note.',
+    });
+  }
+});
+
+app.delete('/api/notes/:noteId', (req, res) => {
+  const userId = sanitizeUserId(req.body?.userId || req.query?.userId);
+  const noteId = String(req.params.noteId || '').trim();
+
+  // RLS check across all user maps: if noteId belongs to another user, reject deletion with 403
+  for (const [ownerId, ownerMap] of userNotesStore.entries()) {
+    const foreignNote = ownerMap.get(noteId);
+    if (foreignNote && (ownerId !== userId || foreignNote.userId !== userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Row-Level Security violation: Cannot delete another user note.',
+      });
+    }
+  }
+
+  const userMap = userNotesStore.get(userId);
+  if (!userMap || !userMap.has(noteId)) {
+    return res.json({
+      success: true,
+      userId,
+      deleted: false,
+    });
+  }
+  userMap.delete(noteId);
+  return res.json({
+    success: true,
+    userId,
+    deleted: true,
+    noteId,
   });
 });
 
