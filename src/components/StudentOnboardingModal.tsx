@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   UserPlus,
@@ -10,6 +10,7 @@ import {
   ArrowRight,
   ArrowLeft,
   Sparkles,
+  Upload,
 } from 'lucide-react';
 import { LearnerProfile, SkillProficiency } from '../types';
 import {
@@ -20,6 +21,9 @@ import {
   LEARNER_ROLE_OPTIONS,
   registerNewStudentProfile,
   calculateProfileCompletionReport,
+  isLearnerProfileCreated,
+  generateInitialsAvatarDataUrl,
+  sanitizeProfileAvatarUrl,
 } from '../utils/studyWorkspaceLogic';
 
 interface StudentOnboardingModalProps {
@@ -40,6 +44,7 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
   initialMode = 'onboarding',
   onCompleteOnboarding,
 }) => {
+  const onboardingFileInputRef = useRef<HTMLInputElement | null>(null);
   const [mode, setMode] = useState<'register' | 'onboarding'>(initialMode);
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [isNewRegistration, setIsNewRegistration] = useState<boolean>(
@@ -61,6 +66,10 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
   const [avatarUrl, setAvatarUrl] = useState<string>(
     currentProfile.avatarUrl || DEFAULT_AVATAR_OPTIONS[0].url
   );
+  const [customAvatarLink, setCustomAvatarLink] = useState<string>(() => {
+    const initial = currentProfile.avatarUrl || '';
+    return initial.startsWith('http://') || initial.startsWith('https://') ? initial : '';
+  });
   const [country, setCountry] = useState<string>(currentProfile.country || 'India');
   const [preferredLanguage, setPreferredLanguage] = useState<string>(
     currentProfile.preferredLanguage || 'English'
@@ -284,6 +293,20 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
     setPersonalLearningGoals(prev => prev.filter(g => g !== goal));
   };
 
+  const handleOnboardingPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawDataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!rawDataUrl) return;
+      setAvatarUrl(rawDataUrl);
+      setCustomAvatarLink('');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const buildDraftProfile = (markCompleted: boolean): LearnerProfile => {
     const weeklyHoursGoal = Math.max(
       1,
@@ -294,12 +317,18 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
       currentProfile.careerObjective ||
       'Full-Stack & Software Engineering Mastery';
 
+    const resolvedAvatar = sanitizeProfileAvatarUrl(
+      avatarUrl,
+      customAvatarLink,
+      name || currentProfile.name || 'Student'
+    );
+
     return {
       ...currentProfile,
       userId: userId || 'default-learner',
       email: email || 'student@devtrack.edu',
       name: name.trim() || 'Student Learner',
-      avatarUrl: avatarUrl || DEFAULT_AVATAR_OPTIONS[0].url,
+      avatarUrl: resolvedAvatar,
       country: country.trim(),
       preferredLanguage: preferredLanguage.trim() || 'English',
       educationLevel: educationLevel.trim(),
@@ -328,6 +357,7 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
   };
 
   const draftCompletion = calculateProfileCompletionReport(buildDraftProfile(false));
+  const profileAlreadyCreated = isLearnerProfileCreated(currentProfile);
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   return (
@@ -338,6 +368,14 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
       aria-labelledby="student-onboarding-modal-title"
     >
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-3xl w-full p-6 space-y-6 relative max-h-[92vh] overflow-y-auto">
+        <input
+          ref={onboardingFileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleOnboardingPhotoUpload}
+          className="hidden"
+        />
+
         {/* Top Header */}
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
           <div className="space-y-1">
@@ -373,7 +411,7 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {mode === 'onboarding' && (
+            {mode === 'onboarding' && !profileAlreadyCreated && (
               <button
                 type="button"
                 onClick={() => setMode('register')}
@@ -395,7 +433,7 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
 
         {/* Registration Form Mode */}
         {mode === 'register' ? (
-          <form onSubmit={handleStartNewRegistration} className="space-y-4">
+          <form onSubmit={handleStartNewRegistration} noValidate className="space-y-4">
             {regError && (
               <div
                 role="alert"
@@ -570,16 +608,51 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
                 </div>
 
                 {/* Profile Picture Selection */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-slate-700">
-                    Profile Picture (Choose preset or enter image URL)
-                  </label>
+                <div className="space-y-2.5 p-3.5 bg-slate-50/80 border border-slate-200 rounded-2xl">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Profile Picture (Upload Own Photo or Choose Avatar)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onboardingFileInputRef.current?.click()}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload Own Photo</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAvatarUrl(generateInitialsAvatarDataUrl(name || 'Learner'));
+                          setCustomAvatarLink('');
+                        }}
+                        className="px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl cursor-pointer"
+                      >
+                        Use My Initials
+                      </button>
+                    </div>
+                  </div>
                   <div className="flex flex-wrap items-center gap-3">
+                    {avatarUrl.startsWith('data:image/') && (
+                      <div className="flex items-center gap-2 p-2 rounded-xl border border-emerald-500 bg-emerald-50 text-xs font-semibold text-emerald-800">
+                        <img
+                          src={avatarUrl}
+                          alt="Custom Avatar"
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                        <span>Custom Photo</span>
+                      </div>
+                    )}
                     {DEFAULT_AVATAR_OPTIONS.map(av => (
                       <button
                         key={av.url}
                         type="button"
-                        onClick={() => setAvatarUrl(av.url)}
+                        onClick={() => {
+                          setAvatarUrl(av.url);
+                          setCustomAvatarLink('');
+                        }}
                         className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-medium cursor-pointer transition-colors ${
                           avatarUrl === av.url
                             ? 'border-indigo-600 bg-indigo-50 text-indigo-900 font-semibold'
@@ -597,11 +670,15 @@ export const StudentOnboardingModal: React.FC<StudentOnboardingModalProps> = ({
                   </div>
                   <input
                     type="text"
-                    value={avatarUrl}
-                    onChange={e => setAvatarUrl(e.target.value)}
-                    placeholder="Or paste custom avatar image URL..."
+                    value={customAvatarLink}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setCustomAvatarLink(val);
+                      if (val.trim()) setAvatarUrl(val.trim());
+                    }}
+                    placeholder="Optional: Paste external image link (https://...)"
                     aria-label="Custom profile picture URL"
-                    className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+                    className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
                   />
                 </div>
               </div>

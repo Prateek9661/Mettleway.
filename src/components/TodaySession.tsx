@@ -23,6 +23,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Youtube,
+  Search,
+  Square,
+  SlidersHorizontal,
+  Coffee,
+  History,
 } from 'lucide-react';
 import { Tracker, Lesson, StudyTask, LearnerProfile } from '../types';
 import { soundAlert } from '../utils/audioAlert';
@@ -39,6 +44,15 @@ import {
   createDefaultLearnerProfile,
   computeProfileCourseAnalytics,
   getContinueLearningInfoForTracker,
+  FocusTimerPhase,
+  FocusTimerSettings,
+  FocusSessionRecord,
+  createDefaultFocusTimerSettings,
+  resolveFocusPhaseDurationSeconds,
+  recordCompletedFocusSession,
+  computeFocusSessionAnalytics,
+  filterCourseLessons,
+  getUserScopedStorageKey,
 } from '../utils/studyWorkspaceLogic';
 import { ConfettiCelebration } from './ConfettiCelebration';
 import { PersonalVideoNotesPanel } from './PersonalVideoNotesPanel';
@@ -128,13 +142,45 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
       ),
     [allTrackers, activeTracker]
   );
-  // Timer state
+  // Timer & Pomodoro Focus System state
   const defaultMinutes = activeTracker?.dailyMinutesTarget || 60;
+  const [focusPhase, setFocusPhase] = useState<FocusTimerPhase>('study');
+  const [focusSettings, setFocusSettings] = useState<FocusTimerSettings>(() => {
+    try {
+      const saved = localStorage.getItem(
+        getUserScopedStorageKey(effectiveProfile.userId, 'devtrack_focus_settings')
+      );
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return createDefaultFocusTimerSettings(defaultMinutes);
+  });
+  const [isCustomizingFocus, setIsCustomizingFocus] = useState<boolean>(false);
+  const [focusHistory, setFocusHistory] = useState<FocusSessionRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(
+        getUserScopedStorageKey(effectiveProfile.userId, 'devtrack_focus_history')
+      );
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+  const [lastCompletedFocusSummary, setLastCompletedFocusSummary] =
+    useState<FocusSessionRecord | null>(null);
+
   const [secondsRemaining, setSecondsRemaining] = useState<number>(defaultMinutes * 60);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
   const [hasStartedSession, setHasStartedSession] = useState<boolean>(false);
   const [sessionNotes, setSessionNotes] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // In-course lesson search & filter state
+  const [courseLessonSearch, setCourseLessonSearch] = useState<string>('');
+  const [courseLessonStatusFilter, setCourseLessonStatusFilter] = useState<
+    'all' | 'pending' | 'completed'
+  >('all');
 
   // Task Tracker state (persisted per tracker in localStorage)
   const [customTasks, setCustomTasks] = useState<StudyTask[]>([]);
@@ -151,14 +197,36 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     minutes: defaultMinutes,
   });
 
+  // Persist focus settings and focus history per user
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        getUserScopedStorageKey(effectiveProfile.userId, 'devtrack_focus_settings'),
+        JSON.stringify(focusSettings)
+      );
+    } catch {}
+  }, [focusSettings, effectiveProfile.userId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        getUserScopedStorageKey(effectiveProfile.userId, 'devtrack_focus_history'),
+        JSON.stringify(focusHistory)
+      );
+    } catch {}
+  }, [focusHistory, effectiveProfile.userId]);
+
   // Sync timer, reset session state & load course-specific tasks whenever activeTracker or courseUrl changes
   useEffect(() => {
     if (activeTracker) {
+      setFocusPhase('study');
       setSecondsRemaining(activeTracker.dailyMinutesTarget * 60);
       setIsTimerRunning(false);
       setHasStartedSession(false);
       setSessionNotes('');
       setTaskFilter('all');
+      setCourseLessonSearch('');
+      setCourseLessonStatusFilter('all');
 
       try {
         const savedTasks = localStorage.getItem(`devtrack_custom_tasks_${activeTracker.id}`);
@@ -257,6 +325,66 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     () => (activeTracker ? activeTracker.modules.flatMap(m => m.lessons) : []),
     [activeTracker]
   );
+
+  const filteredCourseLessons = React.useMemo(
+    () => filterCourseLessons(allCourseLessons, courseLessonSearch, courseLessonStatusFilter),
+    [allCourseLessons, courseLessonSearch, courseLessonStatusFilter]
+  );
+
+  const focusAnalytics = React.useMemo(
+    () =>
+      computeFocusSessionAnalytics(
+        focusHistory,
+        focusSettings.dailyFocusGoalMinutes || activeTracker?.dailyMinutesTarget || 60
+      ),
+    [focusHistory, focusSettings.dailyFocusGoalMinutes, activeTracker?.dailyMinutesTarget]
+  );
+
+  const handleSelectFocusPhase = (nextPhase: FocusTimerPhase) => {
+    setIsTimerRunning(false);
+    setHasStartedSession(false);
+    setFocusPhase(nextPhase);
+    setSecondsRemaining(resolveFocusPhaseDurationSeconds(focusSettings, nextPhase));
+  };
+
+  const handleStopAndLogFocusSession = () => {
+    if (!activeTracker) return;
+    setIsTimerRunning(false);
+    setHasStartedSession(false);
+    const configuredDurationSecs =
+      focusPhase === 'study'
+        ? (focusSettings.studyMinutes || activeTracker.dailyMinutesTarget || 25) * 60
+        : resolveFocusPhaseDurationSeconds(focusSettings, focusPhase);
+    const elapsedMinutes = Math.max(
+      1,
+      Math.round(Math.max(60, configuredDurationSecs - secondsRemaining) / 60)
+    );
+
+    const updatedHistory = recordCompletedFocusSession(focusHistory, {
+      userId: effectiveProfile.userId,
+      courseId: activeTracker.id,
+      courseTitle: activeTracker.title,
+      lessonId: currentLesson?.id || 'general-session',
+      lessonTitle: currentLesson?.title || activeTracker.title,
+      phase: focusPhase,
+      durationMinutes: elapsedMinutes,
+      summaryNote:
+        sessionNotes.trim() ||
+        (focusPhase === 'study'
+          ? `Focused on ${currentLesson?.title || activeTracker.title}`
+          : 'Rest & recovery break completed'),
+    });
+
+    setFocusHistory(updatedHistory);
+    setLastCompletedFocusSummary(updatedHistory[0] || null);
+    setSecondsRemaining(resolveFocusPhaseDurationSeconds(focusSettings, focusPhase));
+    setToastMessage(
+      `Focus session logged (${elapsedMinutes}m ${
+        focusPhase === 'study' ? 'Study' : 'Break'
+      }) — saved to Focus History.`
+    );
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   // Find previous completed lessons for recap
   const recentlyCompletedLesson: Lesson | null = React.useMemo(() => {
@@ -935,82 +1063,107 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                           />
                         </div>
 
-                        {/* Complete Playlist Sidebar (4 cols on XL) */}
-                        <div className="xl:col-span-4 border border-slate-200 rounded-xl bg-slate-50/70 flex flex-col max-h-[360px] overflow-hidden">
-                          <div className="px-3.5 py-2.5 bg-white border-b border-slate-200 flex items-center justify-between text-xs">
-                            <span className="font-bold text-slate-900">
-                              Course Playlist ({courseProgress.completed}/{courseProgress.total})
-                            </span>
-                            <span className="font-mono tabular-nums text-indigo-600 font-semibold">
-                              {courseProgress.percent}% done
-                            </span>
-                          </div>
-                          <div className="divide-y divide-slate-100 overflow-y-auto flex-1">
-                            {allCourseLessons.map((item, idx) => {
-                              const isPlaying = item.id === currentLesson.id;
-                              return (
-                                <div
-                                  key={item.id}
-                                  className={`px-3 py-2.5 flex items-start gap-2.5 text-xs transition-colors ${
-                                    isPlaying
-                                      ? 'bg-indigo-50/90 text-indigo-950'
-                                      : 'hover:bg-white text-slate-700'
-                                  }`}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => onToggleLesson(item.id)}
-                                    className="mt-0.5 text-slate-400 hover:text-indigo-600 cursor-pointer shrink-0"
-                                    title={
-                                      item.completed ? 'Mark lesson pending' : 'Mark lesson completed'
-                                    }
-                                    aria-label={
-                                      item.completed
-                                        ? `Mark ${item.title} pending`
-                                        : `Mark ${item.title} completed`
-                                    }
-                                  >
-                                    {item.completed ? (
-                                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                    ) : (
-                                      <Circle className="w-4 h-4" />
-                                    )}
-                                  </button>
+                        {/* Complete Playlist Sidebar with In-Course Search & Status Filter (4 cols on XL) */}
+                        <div className="xl:col-span-4 border border-slate-200 rounded-xl bg-slate-50/70 flex flex-col max-h-[380px] overflow-hidden">
+                          <div className="px-3.5 py-2.5 bg-white border-b border-slate-200 space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-slate-900">
+                                Course Playlist ({courseProgress.completed}/{courseProgress.total})
+                              </span>
+                              <span className="font-mono tabular-nums text-indigo-600 font-semibold">
+                                {courseProgress.percent}% done
+                              </span>
+                            </div>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSelectSpecificLesson(item.id, 0)}
-                                    className="flex-1 text-left min-w-0 cursor-pointer space-y-0.5"
+                            {/* In-Course Lesson Search Input */}
+                            <div className="relative">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                              <input
+                                type="text"
+                                data-testid="course-lesson-search-input"
+                                value={courseLessonSearch}
+                                onChange={e => setCourseLessonSearch(e.target.value)}
+                                placeholder="Search lessons or concepts..."
+                                aria-label="Search lessons within this course"
+                                className="w-full pl-8 pr-2.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="divide-y divide-slate-100 overflow-y-auto flex-1">
+                            {filteredCourseLessons.length === 0 ? (
+                              <div className="p-4 text-center text-xs text-slate-500">
+                                No lessons match &ldquo;{courseLessonSearch}&rdquo;.
+                              </div>
+                            ) : (
+                              filteredCourseLessons.map(({ lesson: item, originalIndex: idx }) => {
+                                const isPlaying = item.id === currentLesson.id;
+                                return (
+                                  <div
+                                    key={item.id}
+                                    className={`px-3 py-2.5 flex items-start gap-2.5 text-xs transition-colors ${
+                                      isPlaying
+                                        ? 'bg-indigo-50/90 text-indigo-950'
+                                        : 'hover:bg-white text-slate-700'
+                                    }`}
                                   >
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span
-                                        className={`font-mono tabular-nums text-[11px] ${
-                                          isPlaying
-                                            ? 'font-bold text-indigo-600'
-                                            : 'text-slate-400'
+                                    <button
+                                      type="button"
+                                      onClick={() => onToggleLesson(item.id)}
+                                      className="mt-0.5 text-slate-400 hover:text-indigo-600 cursor-pointer shrink-0"
+                                      title={
+                                        item.completed
+                                          ? 'Mark lesson pending'
+                                          : 'Mark lesson completed'
+                                      }
+                                      aria-label={
+                                        item.completed
+                                          ? `Mark ${item.title} pending`
+                                          : `Mark ${item.title} completed`
+                                      }
+                                    >
+                                      {item.completed ? (
+                                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                      ) : (
+                                        <Circle className="w-4 h-4" />
+                                      )}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSelectSpecificLesson(item.id, 0)}
+                                      className="flex-1 text-left min-w-0 cursor-pointer space-y-0.5"
+                                    >
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span
+                                          className={`font-mono tabular-nums text-[11px] ${
+                                            isPlaying
+                                              ? 'font-bold text-indigo-600'
+                                              : 'text-slate-400'
+                                          }`}
+                                        >
+                                          {isPlaying ? `▶ Playing #${idx + 1}` : `Lecture #${idx + 1}`}
+                                        </span>
+                                        <span className="font-mono tabular-nums text-[11px] text-slate-400">
+                                          {item.durationMinutes}m
+                                        </span>
+                                      </div>
+                                      <p
+                                        className={`line-clamp-2 leading-snug ${
+                                          item.completed
+                                            ? 'line-through text-slate-400'
+                                            : isPlaying
+                                            ? 'font-bold text-indigo-950'
+                                            : 'font-medium text-slate-800'
                                         }`}
                                       >
-                                        {isPlaying ? `▶ Playing #${idx + 1}` : `Lecture #${idx + 1}`}
-                                      </span>
-                                      <span className="font-mono tabular-nums text-[11px] text-slate-400">
-                                        {item.durationMinutes}m
-                                      </span>
-                                    </div>
-                                    <p
-                                      className={`line-clamp-2 leading-snug ${
-                                        item.completed
-                                          ? 'line-through text-slate-400'
-                                          : isPlaying
-                                          ? 'font-bold text-indigo-950'
-                                          : 'font-medium text-slate-800'
-                                      }`}
-                                    >
-                                      {item.title}
-                                    </p>
-                                  </button>
-                                </div>
-                              );
-                            })}
+                                        {item.title}
+                                      </p>
+                                    </button>
+                                  </div>
+                                );
+                              })
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1251,21 +1404,164 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
 
         {/* Right Utility Column (4 cols): Focus Timer & Previous Concept Recap */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Focus Session Timer Card */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col items-center text-center">
-            <div className="flex items-center justify-between w-full mb-2">
-              <span className="text-xs uppercase tracking-wider font-semibold text-slate-500">
-                Focus Study Timer
+          {/* Focus & Pomodoro Concentration System Card */}
+          <div
+            data-testid="focus-pomodoro-card"
+            className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col items-center text-center space-y-4"
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Focus &amp; Pomodoro Timer</span>
               </span>
-              <span className="text-xs font-bold font-mono tabular-nums text-indigo-600">
-                {totalDailyMinutesStudied}/{targetMinutes}m ({progressPercent}%)
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold font-mono tabular-nums text-indigo-600">
+                  {totalDailyMinutesStudied + focusAnalytics.todayFocusMinutes}/{targetMinutes}m (
+                  {progressPercent}%)
+                </span>
+                <button
+                  type="button"
+                  data-testid="toggle-focus-settings-btn"
+                  onClick={() => setIsCustomizingFocus(prev => !prev)}
+                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                  title="Customize study and break durations"
+                  aria-label="Customize focus settings"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
+            {/* Pomodoro Phase Selector: Study / Short Break / Long Break */}
+            <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl w-full text-xs font-semibold">
+              <button
+                type="button"
+                data-testid="focus-phase-study-btn"
+                onClick={() => handleSelectFocusPhase('study')}
+                className={`py-1.5 px-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                  focusPhase === 'study'
+                    ? 'bg-white text-slate-900 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Pomodoro ({focusSettings.studyMinutes}m)
+              </button>
+              <button
+                type="button"
+                data-testid="focus-phase-short-break-btn"
+                onClick={() => handleSelectFocusPhase('short_break')}
+                className={`py-1.5 px-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap inline-flex items-center justify-center gap-1 ${
+                  focusPhase === 'short_break'
+                    ? 'bg-white text-emerald-800 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Coffee className="w-3 h-3" />
+                <span>Break ({focusSettings.shortBreakMinutes}m)</span>
+              </button>
+              <button
+                type="button"
+                data-testid="focus-phase-long-break-btn"
+                onClick={() => handleSelectFocusPhase('long_break')}
+                className={`py-1.5 px-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                  focusPhase === 'long_break'
+                    ? 'bg-white text-emerald-800 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Long ({focusSettings.longBreakMinutes}m)
+              </button>
+            </div>
+
+            {/* Customizable Study & Break Durations Panel */}
+            {isCustomizingFocus && (
+              <div
+                data-testid="focus-settings-panel"
+                className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-left space-y-3 text-xs"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800">Customize Focus Durations</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextSecs = resolveFocusPhaseDurationSeconds(focusSettings, focusPhase);
+                      setSecondsRemaining(nextSecs);
+                      setIsCustomizingFocus(false);
+                    }}
+                    className="text-indigo-600 font-semibold hover:underline cursor-pointer"
+                  >
+                    Apply &amp; Close
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                      Study (m)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={120}
+                      value={focusSettings.studyMinutes}
+                      onChange={e => {
+                        const val = Math.max(5, Math.min(120, Number(e.target.value) || 25));
+                        setFocusSettings(prev => ({ ...prev, studyMinutes: val }));
+                        if (focusPhase === 'study' && !isTimerRunning) {
+                          setSecondsRemaining(val * 60);
+                        }
+                      }}
+                      aria-label="Study duration minutes"
+                      className="w-full px-2 py-1 font-mono tabular-nums font-semibold bg-white border border-slate-200 rounded-lg text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                      Short Break
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={focusSettings.shortBreakMinutes}
+                      onChange={e => {
+                        const val = Math.max(1, Math.min(30, Number(e.target.value) || 5));
+                        setFocusSettings(prev => ({ ...prev, shortBreakMinutes: val }));
+                        if (focusPhase === 'short_break' && !isTimerRunning) {
+                          setSecondsRemaining(val * 60);
+                        }
+                      }}
+                      aria-label="Short break duration minutes"
+                      className="w-full px-2 py-1 font-mono tabular-nums font-semibold bg-white border border-slate-200 rounded-lg text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                      Long Break
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={60}
+                      value={focusSettings.longBreakMinutes}
+                      onChange={e => {
+                        const val = Math.max(5, Math.min(60, Number(e.target.value) || 15));
+                        setFocusSettings(prev => ({ ...prev, longBreakMinutes: val }));
+                        if (focusPhase === 'long_break' && !isTimerRunning) {
+                          setSecondsRemaining(val * 60);
+                        }
+                      }}
+                      aria-label="Long break duration minutes"
+                      className="w-full px-2 py-1 font-mono tabular-nums font-semibold bg-white border border-slate-200 rounded-lg text-slate-900"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Visual Circular Progress Ring */}
-            <div className="relative my-3 flex items-center justify-center">
+            <div className="relative my-1 flex items-center justify-center">
               <svg
-                className="w-48 h-48 transform -rotate-90"
+                className="w-44 h-44 transform -rotate-90"
                 viewBox="0 0 210 210"
                 aria-label={`Daily progress: ${progressPercent}%`}
               >
@@ -1282,7 +1578,13 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                   cy="105"
                   r={circleRadius}
                   fill="transparent"
-                  stroke={progressPercent >= 100 ? '#10B981' : '#4F46E5'}
+                  stroke={
+                    focusPhase !== 'study'
+                      ? '#10B981'
+                      : progressPercent >= 100
+                      ? '#10B981'
+                      : '#4F46E5'
+                  }
                   strokeWidth="10"
                   strokeDasharray={circleCircumference}
                   strokeDashoffset={strokeDashoffset}
@@ -1297,7 +1599,9 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 </span>
                 <span className="text-[11px] font-medium text-slate-500 mt-1 font-mono tabular-nums">
                   {isTimerRunning
-                    ? 'Focus session active'
+                    ? focusPhase === 'study'
+                      ? 'Focus session active'
+                      : 'Recovery break active'
                     : progressPercent >= 100
                     ? 'Daily target achieved'
                     : `${targetMinutes}m daily goal`}
@@ -1305,15 +1609,16 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
               </div>
             </div>
 
-            {/* Timer Controls */}
-            <div className="flex items-center gap-2.5 mb-5 w-full justify-center">
+            {/* Timer Controls: Start/Pause/Resume + Stop & Log + Reset */}
+            <div className="flex flex-wrap items-center gap-2 w-full justify-center">
               <button
                 type="button"
+                data-testid="toggle-focus-timer-btn"
                 onClick={() => {
                   setIsTimerRunning(!isTimerRunning);
                   setHasStartedSession(true);
                 }}
-                className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-xs cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-xs cursor-pointer ${
                   isTimerRunning
                     ? 'bg-amber-500 hover:bg-amber-600 text-white'
                     : 'bg-indigo-600 hover:bg-indigo-700 text-white'
@@ -1334,6 +1639,17 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
 
               <button
                 type="button"
+                data-testid="stop-focus-session-btn"
+                onClick={handleStopAndLogFocusSession}
+                className="inline-flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                title="Stop timer and log focus session to history"
+              >
+                <Square className="w-3 h-3 fill-slate-700" />
+                <span>Stop &amp; Log</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   setIsTimerRunning(false);
                   setSecondsRemaining(activeTracker.dailyMinutesTarget * 60);
@@ -1346,31 +1662,96 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
               </button>
             </div>
 
-            {/* Quick preset increments */}
-            <div className="flex items-center gap-2 text-xs text-slate-500 border-t border-slate-100 pt-3.5 w-full justify-center">
-              <span>Adjust:</span>
-              <button
-                type="button"
-                onClick={() => setSecondsRemaining(prev => prev + 300)}
-                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
-              >
-                +5m
-              </button>
-              <button
-                type="button"
-                onClick={() => setSecondsRemaining(prev => prev + 900)}
-                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
-              >
-                +15m
-              </button>
-              <button
-                type="button"
-                onClick={() => setSecondsRemaining(activeTracker.dailyMinutesTarget * 60)}
-                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
-              >
-                {activeTracker.dailyMinutesTarget}m
-              </button>
+            {/* Quick preset increments & Distraction-Free Focus Mode toggle */}
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 border-t border-slate-100 pt-3.5 w-full">
+              <div className="flex items-center gap-1.5">
+                <span>Adjust:</span>
+                <button
+                  type="button"
+                  onClick={() => setSecondsRemaining(prev => prev + 300)}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
+                >
+                  +5m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSecondsRemaining(prev => prev + 900)}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
+                >
+                  +15m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSecondsRemaining(activeTracker.dailyMinutesTarget * 60)}
+                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-mono tabular-nums cursor-pointer"
+                >
+                  {activeTracker.dailyMinutesTarget}m
+                </button>
+              </div>
+
+              {onToggleDeepWork && (
+                <button
+                  type="button"
+                  onClick={onToggleDeepWork}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
+                    isDeepWork
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                  }`}
+                >
+                  <Shield className="w-3 h-3" />
+                  <span>{isDeepWork ? 'Exit Focus Mode' : 'Focus Mode'}</span>
+                </button>
+              )}
             </div>
+
+            {/* Session Completion Summary & Recent Focus Session History */}
+            {(lastCompletedFocusSummary || focusAnalytics.recentSessions.length > 0) && (
+              <div
+                data-testid="focus-session-history-box"
+                className="w-full pt-3 border-t border-slate-100 text-left space-y-2"
+              >
+                {lastCompletedFocusSummary && (
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-0.5">
+                    <div className="font-bold flex items-center justify-between">
+                      <span>Session Summary Logged</span>
+                      <span className="font-mono tabular-nums">
+                        +{lastCompletedFocusSummary.durationMinutes}m
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-800 truncate">
+                      {lastCompletedFocusSummary.lessonTitle}
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                  <span className="flex items-center gap-1">
+                    <History className="w-3 h-3 text-indigo-600" />
+                    <span>Focus History ({focusAnalytics.studySessionsCount} study)</span>
+                  </span>
+                  <span className="font-mono tabular-nums text-slate-500">
+                    {focusAnalytics.todayFocusMinutes}m focused today
+                  </span>
+                </div>
+
+                <div className="space-y-1 max-h-28 overflow-y-auto">
+                  {focusAnalytics.recentSessions.slice(0, 3).map(sess => (
+                    <div
+                      key={sess.id}
+                      className="flex items-center justify-between text-[11px] px-2 py-1 bg-slate-50 rounded-lg text-slate-700"
+                    >
+                      <span className="truncate pr-2">
+                        {sess.phase === 'study' ? 'Pomodoro:' : 'Break:'} {sess.lessonTitle}
+                      </span>
+                      <span className="font-mono tabular-nums font-semibold text-indigo-600 shrink-0">
+                        {sess.durationMinutes}m
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Career & Skill Development Milestones + Course Portfolio Card (Hidden in Deep Work mode) */}

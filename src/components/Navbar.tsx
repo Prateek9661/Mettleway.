@@ -77,6 +77,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
               <button
                 type="button"
+                data-testid="nav-tab-today"
                 onClick={() => setActiveTab('today')}
                 className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
                   activeTab === 'today'
@@ -88,6 +89,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
               <button
                 type="button"
+                data-testid="nav-tab-dashboard"
                 onClick={() => setActiveTab('dashboard')}
                 className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
                   activeTab === 'dashboard'
@@ -99,6 +101,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
               <button
                 type="button"
+                data-testid="nav-tab-notes"
                 onClick={() => setActiveTab('notes')}
                 className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
                   activeTab === 'notes'
@@ -110,6 +113,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
               <button
                 type="button"
+                data-testid="nav-tab-library"
                 onClick={() => setActiveTab('library')}
                 className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
                   activeTab === 'library'
@@ -121,17 +125,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('curriculum')}
-                className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
-                  activeTab === 'curriculum'
-                    ? 'border-indigo-600 text-slate-900 font-semibold'
-                    : 'border-transparent hover:text-slate-900 hover:border-slate-300'
-                }`}
-              >
-                Study Roadmap
-              </button>
-              <button
-                type="button"
+                data-testid="nav-tab-mentor"
                 onClick={() => setActiveTab('mentor')}
                 className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
                   activeTab === 'mentor'
@@ -140,17 +134,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }`}
               >
                 Concept Mentor
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('profile')}
-                className={`whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 cursor-pointer ${
-                  activeTab === 'profile'
-                    ? 'border-indigo-600 text-slate-900 font-semibold'
-                    : 'border-transparent hover:text-slate-900 hover:border-slate-300'
-                }`}
-              >
-                My Profile
               </button>
             </nav>
           )}

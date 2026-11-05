@@ -27,6 +27,7 @@ export const StudySquadsView: React.FC<StudySquadsViewProps> = ({
   const [isCreatingSquad, setIsCreatingSquad] = useState<boolean>(false);
   const [newSquadName, setNewSquadName] = useState<string>('');
   const [newSquadGoal, setNewSquadGoal] = useState<string>('');
+  const [shareProgressOnly, setShareProgressOnly] = useState<boolean>(true);
 
   const activeSquad = squads.find(s => s.id === currentSquadId) || squads[0];
 
@@ -210,6 +211,28 @@ export const StudySquadsView: React.FC<StudySquadsViewProps> = ({
               style={{ width: `${activeSquad.totalGoalCompletedPercent}%` }}
             />
           </div>
+        </div>
+
+        {/* Privacy & Personal Notes Protection Guarantee */}
+        <div
+          data-testid="squad-privacy-banner"
+          className="p-3.5 bg-indigo-50/70 border border-indigo-100 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+        >
+          <div className="space-y-0.5">
+            <span className="font-bold text-indigo-950 block">
+              Learner Privacy Protection: Personal Notes &amp; Profile Details Are Strictly Private
+            </span>
+            <p className="text-[11px] text-indigo-900">
+              Only your opt-in study streak and high-level lesson completion status are visible to squad peers. Your personal video notes, timestamps, and private profile details are never shared.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShareProgressOnly(prev => !prev)}
+            className="px-3 py-1.5 text-xs font-semibold bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            {shareProgressOnly ? 'Sharing: Streak & Progress Only' : 'Privacy: Ghost Mode (Hidden)'}
+          </button>
         </div>
       </div>
 

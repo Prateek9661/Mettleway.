@@ -17,6 +17,9 @@ import {
   User,
   Sparkles,
   Pencil,
+  Compass,
+  Award,
+  ArrowRight,
 } from 'lucide-react';
 import { Tracker, DailyLogEntry, LearnerProfile } from '../types';
 import {
@@ -26,6 +29,8 @@ import {
   getRecentNotesForDashboard,
   calculateProfileCompletionReport,
   computePersonalizedCourseRecommendations,
+  computeLearnerNextStepRecommendation,
+  computeLearnerAchievements,
 } from '../utils/studyWorkspaceLogic';
 
 interface StudentDashboardViewProps {
@@ -89,6 +94,33 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
         activeTrackerId
       ),
     [trackers, dailyLogs, streakDays, learnerProfile.dailyMinutesTarget, activeTrackerId]
+  );
+
+  const activeTrackerObj = useMemo(
+    () => trackers.find(t => t.id === activeTrackerId) || trackers[0] || null,
+    [trackers, activeTrackerId]
+  );
+
+  const nextStepGuidance = useMemo(
+    () =>
+      computeLearnerNextStepRecommendation(
+        activeTrackerObj,
+        dailyLogs,
+        learnerProfile.dailyMinutesTarget || 60
+      ),
+    [activeTrackerObj, dailyLogs, learnerProfile.dailyMinutesTarget]
+  );
+
+  const achievements = useMemo(
+    () =>
+      computeLearnerAchievements(
+        trackers,
+        dailyLogs,
+        streakDays,
+        [],
+        learnerProfile.userId
+      ),
+    [trackers, dailyLogs, streakDays, learnerProfile.userId]
   );
 
   const maxWeeklyMinutes = useMemo(() => {
@@ -236,6 +268,66 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
           <div className="flex items-center gap-2 text-xs text-slate-500 font-mono tabular-nums">
             <span>{summary.totalWeeklyMinutes} mins studied this week</span>
           </div>
+        </div>
+      </div>
+
+      {/* Clear Next-Step Recommendation Banner (Journey Step 6: Know a useful next step without searching) */}
+      <div
+        data-testid="dashboard-next-step-banner"
+        className="bg-indigo-50/90 border border-indigo-200 rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4"
+      >
+        <div className="space-y-1 max-w-3xl">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-indigo-700 font-semibold">
+            <Compass className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>Recommended Next Step</span>
+            <span aria-hidden="true">·</span>
+            <span className="font-mono tabular-nums text-slate-600">
+              Today&apos;s Goal: {learnerProfile.dailyMinutesTarget || 60} mins
+            </span>
+          </div>
+          <h2 className="text-base font-bold text-slate-900">{nextStepGuidance.headline}</h2>
+          <p className="text-xs text-slate-600 leading-relaxed">{nextStepGuidance.subtext}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            data-testid="dashboard-next-step-cta"
+            onClick={() => {
+              if (
+                nextStepGuidance.actionType === 'resume_lesson' ||
+                nextStepGuidance.actionType === 'start_focus'
+              ) {
+                const targetTrackerId =
+                  nextStepGuidance.trackerId || activeTrackerId || trackers[0]?.id || '';
+                const targetLessonId =
+                  nextStepGuidance.lessonId ||
+                  trackers.find(t => t.id === targetTrackerId)?.modules[0]?.lessons[0]?.id ||
+                  '';
+                if (targetTrackerId) {
+                  onResumeCourseLesson(targetTrackerId, targetLessonId);
+                }
+              } else if (nextStepGuidance.actionType === 'add_course') {
+                onOpenCreateModal();
+              } else if (nextStepGuidance.actionType === 'review_mentor') {
+                onOpenMentor(nextStepGuidance.trackerId || activeTrackerId || trackers[0]?.id || '');
+              } else {
+                onOpenCourseLibrary();
+              }
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <span>{nextStepGuidance.actionLabel}</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenMentor(activeTrackerId || trackers[0]?.id || '')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-indigo-700 bg-white border border-indigo-200 hover:bg-indigo-100/50 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <GraduationCap className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Ask AI Mentor</span>
+          </button>
         </div>
       </div>
 
@@ -739,6 +831,61 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Real Activity Milestones & Achievements (Journey Step 5: Progress based on actual learner activity) */}
+      <div
+        data-testid="dashboard-real-achievements"
+        className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Award className="w-4 h-4 text-amber-600" />
+              <span>Verified Learning Milestones (Based on Real Activity)</span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Earned strictly from your completed lectures, timestamped notes, logged study sessions, and consecutive streak days.
+            </p>
+          </div>
+          <span className="text-xs font-mono tabular-nums font-semibold text-slate-700">
+            {achievements.filter(a => a.unlocked).length} / {achievements.length} Unlocked
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+          {achievements.map(ach => (
+            <div
+              key={ach.id}
+              className={`p-4 rounded-xl border space-y-2 transition-colors ${
+                ach.unlocked
+                  ? 'bg-emerald-50/50 border-emerald-200'
+                  : 'bg-slate-50/70 border-slate-200'
+              }`}
+            >
+              <div className="flex items-center justify-between text-xs gap-1">
+                <span
+                  className={`font-bold ${
+                    ach.unlocked ? 'text-emerald-800' : 'text-slate-800'
+                  }`}
+                >
+                  {ach.title}
+                </span>
+                <span
+                  className={`text-[10px] font-mono tabular-nums font-semibold shrink-0 ${
+                    ach.unlocked ? 'text-emerald-700' : 'text-slate-500'
+                  }`}
+                >
+                  {ach.unlocked ? 'Unlocked' : 'In Progress'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">{ach.description}</p>
+              <div className="pt-1 text-[10px] font-mono tabular-nums font-semibold text-indigo-700">
+                {ach.progressText}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

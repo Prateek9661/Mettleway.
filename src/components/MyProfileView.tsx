@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   User,
   Globe,
@@ -16,6 +16,9 @@ import {
   Award,
   Plus,
   X,
+  Camera,
+  Upload,
+  RotateCcw,
 } from 'lucide-react';
 import {
   LearnerProfile,
@@ -33,6 +36,9 @@ import {
   calculateProfileCompletionReport,
   computePersonalizedCourseRecommendations,
   computeProfileCourseAnalytics,
+  isLearnerProfileCreated,
+  generateInitialsAvatarDataUrl,
+  sanitizeProfileAvatarUrl,
 } from '../utils/studyWorkspaceLogic';
 
 interface MyProfileViewProps {
@@ -68,12 +74,21 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
   onMarkCourseCompleted,
   onResetCourseToPending,
 }) => {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   // Editable personal & academic fields
   const [name, setName] = useState<string>(profile.name || '');
   const [email, setEmail] = useState<string>(profile.email || '');
   const [avatarUrl, setAvatarUrl] = useState<string>(
     profile.avatarUrl || DEFAULT_AVATAR_OPTIONS[0].url
   );
+  // Separate state for optional external image URL so internal /src/assets/... or data:image/... never triggers URL input validation
+  const [customAvatarLink, setCustomAvatarLink] = useState<string>(() => {
+    const initial = profile.avatarUrl || '';
+    return initial.startsWith('http://') || initial.startsWith('https://') ? initial : '';
+  });
+  const [avatarUploadNotice, setAvatarUploadNotice] = useState<string | null>(null);
+
   const [country, setCountry] = useState<string>(profile.country || '');
   const [preferredLanguage, setPreferredLanguage] = useState<string>(
     profile.preferredLanguage || 'English'
@@ -122,6 +137,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
   );
   const [syncToActiveCourse, setSyncToActiveCourse] = useState<boolean>(true);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState<boolean>(false);
   const [courseAnalyticsTab, setCourseAnalyticsTab] = useState<
     'in_progress' | 'completed' | 'pending'
   >('in_progress');
@@ -130,7 +146,11 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
   useEffect(() => {
     setName(profile.name || '');
     setEmail(profile.email || '');
-    setAvatarUrl(profile.avatarUrl || DEFAULT_AVATAR_OPTIONS[0].url);
+    const nextAvatar = profile.avatarUrl || DEFAULT_AVATAR_OPTIONS[0].url;
+    setAvatarUrl(nextAvatar);
+    setCustomAvatarLink(
+      nextAvatar.startsWith('http://') || nextAvatar.startsWith('https://') ? nextAvatar : ''
+    );
     setCountry(profile.country || '');
     setPreferredLanguage(profile.preferredLanguage || 'English');
     setRole(profile.role || 'College / University Student');
@@ -154,13 +174,18 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
     );
   }, [profile]);
 
+  const resolvedAvatarUrl = useMemo(
+    () => sanitizeProfileAvatarUrl(avatarUrl, customAvatarLink, name || profile.name),
+    [avatarUrl, customAvatarLink, name, profile.name]
+  );
+
   // Live draft profile for real-time completion % and recommendations preview
   const liveProfileDraft: LearnerProfile = useMemo(
     () => ({
       ...profile,
       name: name.trim() || profile.name,
       email: email.trim() || profile.email,
-      avatarUrl,
+      avatarUrl: resolvedAvatarUrl,
       country: country.trim(),
       preferredLanguage: preferredLanguage.trim(),
       role,
@@ -187,7 +212,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
       profile,
       name,
       email,
-      avatarUrl,
+      resolvedAvatarUrl,
       country,
       preferredLanguage,
       role,
@@ -222,6 +247,73 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
     () => computeProfileCourseAnalytics(trackers),
     [trackers]
   );
+
+  const profileAlreadyCreated = useMemo(
+    () => isLearnerProfileCreated(profile),
+    [profile]
+  );
+
+  // Handle uploading custom profile photo from user's computer or mobile device
+  const handleAvatarFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setAvatarUploadNotice('Please select a valid image file (PNG, JPG, WebP, or GIF).');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawDataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!rawDataUrl) return;
+
+      // Resize onto a 256x256 square canvas for fast, lightweight localStorage persistence
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const size = 256;
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            const minSide = Math.min(img.width, img.height);
+            const sx = (img.width - minSide) / 2;
+            const sy = (img.height - minSide) / 2;
+            ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+            const optimizedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+            setAvatarUrl(optimizedDataUrl);
+            setCustomAvatarLink('');
+            setAvatarUploadNotice('Your custom profile picture is set! Click "Save Profile" to keep changes.');
+          } else {
+            setAvatarUrl(rawDataUrl);
+            setCustomAvatarLink('');
+            setAvatarUploadNotice('Your custom profile picture is set!');
+          }
+        } catch {
+          setAvatarUrl(rawDataUrl);
+          setCustomAvatarLink('');
+          setAvatarUploadNotice('Your custom profile picture is set!');
+        }
+      };
+      img.onerror = () => {
+        setAvatarUrl(rawDataUrl);
+        setCustomAvatarLink('');
+        setAvatarUploadNotice('Your custom profile picture is set!');
+      };
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleUseInitialsAvatar = () => {
+    const generated = generateInitialsAvatarDataUrl(name || profile.name || 'Learner');
+    setAvatarUrl(generated);
+    setCustomAvatarLink('');
+    setAvatarUploadNotice('Generated custom initials avatar for your profile.');
+  };
 
   const handleToggleInterest = (interest: string) => {
     setLearningInterests(prev => {
@@ -272,11 +364,12 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
     });
   };
 
-  const handleSubmitProfile = (e: React.FormEvent) => {
-    e.preventDefault();
+  const persistProfileChanges = () => {
     const updated: LearnerProfile = {
       ...liveProfileDraft,
+      avatarUrl: resolvedAvatarUrl,
       onboardingCompleted: true,
+      onboardingCompletedAt: profile.onboardingCompletedAt || new Date().toISOString(),
     };
     onSaveProfile(updated, syncToActiveCourse);
 
@@ -290,10 +383,20 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
       }),
     }).catch(() => {});
 
+    setAvatarUploadNotice(null);
+    setJustSaved(true);
     setSaveBanner(
-      'Your personalized learner profile, skill levels, and study preferences have been saved.'
+      'Your personalized learner profile, profile picture, skill levels, and study preferences have been saved.'
     );
-    setTimeout(() => setSaveBanner(null), 4000);
+    setTimeout(() => {
+      setJustSaved(false);
+    }, 2500);
+    setTimeout(() => setSaveBanner(null), 4500);
+  };
+
+  const handleSubmitProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    persistProfileChanges();
   };
 
   const displayedAnalyticsList =
@@ -305,16 +408,42 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      {/* Hidden Device File Input for Custom Profile Photo Upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleAvatarFileUpload}
+        data-testid="profile-avatar-file-input"
+        aria-label="Upload custom profile picture from device"
+        className="hidden"
+      />
+
       {/* Top Personalized Profile Hero & Completion Percentage Card */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-            <img
-              src={avatarUrl || DEFAULT_AVATAR_OPTIONS[0].url}
-              alt={name || 'Student Avatar'}
-              className="w-16 h-16 rounded-2xl object-cover border-2 border-indigo-100 shrink-0"
-            />
-            <div className="space-y-1">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+            {/* Interactive Avatar with Direct "Upload Photo" Camera Button */}
+            <div className="relative group shrink-0 self-start sm:self-center">
+              <img
+                src={resolvedAvatarUrl}
+                alt={name || 'Learner Avatar'}
+                data-testid="profile-hero-avatar-img"
+                className="w-20 h-20 rounded-2xl object-cover border-2 border-indigo-100 shadow-xs bg-slate-100"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                data-testid="profile-hero-upload-photo-btn"
+                title="Upload your own profile photo from device"
+                className="absolute -bottom-2 -right-2 inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm border border-white transition-colors cursor-pointer"
+              >
+                <Camera className="w-3 h-3" />
+                <span>Photo</span>
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <span className="font-semibold text-indigo-600">{role}</span>
                 {country && (
@@ -342,12 +471,12 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
               <p className="text-xs text-slate-600 max-w-2xl">
                 {careerAspiration
                   ? `Career Aspiration: ${careerAspiration}`
-                  : 'Complete your student profile below to personalize course recommendations and learning roadmaps.'}
+                  : 'Complete your learner profile below to personalize course recommendations and learning roadmaps.'}
               </p>
             </div>
           </div>
 
-          {/* Profile Completion Bar + Onboarding Wizard Triggers */}
+          {/* Profile Completion Bar + Action Triggers */}
           <div className="flex flex-col sm:flex-row lg:flex-col items-stretch sm:items-center lg:items-end gap-3 shrink-0">
             <div className="w-full sm:w-72 space-y-1.5">
               <div className="flex items-center justify-between text-xs">
@@ -378,20 +507,41 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
+                onClick={persistProfileChanges}
+                data-testid="profile-top-save-btn"
+                className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white rounded-xl transition-all shadow-xs cursor-pointer active:scale-[0.98] ${
+                  justSaved
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {justSaved ? (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>Save Profile</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => onOpenOnboardingWizard('onboarding')}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Launch 4-Step Onboarding Wizard</span>
+                <span>4-Step Setup Wizard</span>
               </button>
-              <button
-                type="button"
-                onClick={() => onOpenOnboardingWizard('register')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Register New Student</span>
-              </button>
+              {/* Only show "Create / Register Profile" if the learner has NOT created their profile yet */}
+              {!profileAlreadyCreated && (
+                <button
+                  type="button"
+                  data-testid="profile-register-new-student-btn"
+                  onClick={() => onOpenOnboardingWizard('register')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Create Student Profile</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -400,6 +550,7 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
       {saveBanner && (
         <div
           role="status"
+          data-testid="profile-save-success-banner"
           className="px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-semibold text-emerald-800 flex items-center justify-between"
         >
           <div className="flex items-center gap-2">
@@ -419,8 +570,8 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
 
       {/* Main 2-Column Layout: Left (Editable Profile Form) | Right (Personalized Recommendations & Course History) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column (7 cols): Editable Student Profile Sections */}
-        <form onSubmit={handleSubmitProfile} className="lg:col-span-7 space-y-6">
+        {/* Left Column (7 cols): Editable Student Profile Sections (noValidate prevents HTML5 URL popup blocking) */}
+        <form onSubmit={handleSubmitProfile} noValidate className="lg:col-span-7 space-y-6">
           {/* Section 1: Personal Information */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
             <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
@@ -501,19 +652,90 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
               </div>
             </div>
 
-            {/* Profile Picture Selector + Custom URL */}
-            <div className="space-y-2 pt-1">
-              <label className="block text-xs font-semibold text-slate-700">
-                Profile Picture (Select Avatar or Paste Custom Image URL)
-              </label>
+            {/* Profile Picture Studio: Upload Own Photo, Generate Initials Avatar, Pick Preset, or Paste Optional Link */}
+            <div className="p-4 bg-slate-50/80 border border-slate-200 rounded-2xl space-y-3 pt-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-800">
+                    Profile Picture (Upload Own Photo or Choose Avatar)
+                  </label>
+                  <p className="text-[11px] text-slate-500">
+                    Upload any photo from your device, generate an initials avatar, or choose a preset below.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    data-testid="profile-upload-own-photo-btn"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload Own Photo</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="profile-use-initials-avatar-btn"
+                    onClick={handleUseInitialsAvatar}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <span>Use My Initials</span>
+                  </button>
+                  {avatarUrl.startsWith('data:image/') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAvatarUrl(DEFAULT_AVATAR_OPTIONS[0].url);
+                        setCustomAvatarLink('');
+                        setAvatarUploadNotice(null);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-xl cursor-pointer"
+                      title="Reset to default avatar"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {avatarUploadNotice && (
+                <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-medium text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{avatarUploadNotice}</span>
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center gap-3">
+                {/* Current Custom / Initials Preview if active */}
+                {avatarUrl.startsWith('data:image/') && (
+                  <div className="flex items-center gap-2 pr-2 border-r border-slate-200">
+                    <img
+                      src={avatarUrl}
+                      alt="Your custom uploaded avatar"
+                      className="w-11 h-11 rounded-xl object-cover border-2 border-emerald-600 shadow-2xs"
+                    />
+                    <span className="text-[11px] font-semibold text-emerald-700">
+                      Custom Photo Active
+                    </span>
+                  </div>
+                )}
+
+                {/* Preset Avatars */}
                 {DEFAULT_AVATAR_OPTIONS.map((opt, idx) => (
                   <button
                     key={opt.url}
                     type="button"
-                    onClick={() => setAvatarUrl(opt.url)}
+                    onClick={() => {
+                      setAvatarUrl(opt.url);
+                      setCustomAvatarLink('');
+                      setAvatarUploadNotice(null);
+                    }}
                     className={`p-0.5 rounded-xl border-2 transition-all cursor-pointer ${
-                      avatarUrl === opt.url ? 'border-indigo-600 scale-105' : 'border-transparent'
+                      resolvedAvatarUrl === opt.url
+                        ? 'border-indigo-600 scale-105'
+                        : 'border-transparent hover:border-slate-300'
                     }`}
                     title={`Select avatar ${opt.label}`}
                   >
@@ -524,13 +746,21 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
                     />
                   </button>
                 ))}
+
+                {/* Optional External Image Link (type="text" so it NEVER triggers browser URL popup) */}
                 <input
-                  type="url"
-                  value={avatarUrl}
-                  onChange={e => setAvatarUrl(e.target.value)}
-                  placeholder="https://example.com/avatar.jpg"
+                  type="text"
+                  value={customAvatarLink}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setCustomAvatarLink(val);
+                    if (val.trim()) {
+                      setAvatarUrl(val.trim());
+                    }
+                  }}
+                  placeholder="Optional: Paste external image link (https://...)"
                   aria-label="Custom profile picture URL"
-                  className="flex-1 min-w-[200px] px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+                  className="flex-1 min-w-[200px] px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
                 />
               </div>
             </div>
@@ -889,6 +1119,27 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
               />
             </div>
 
+            {saveBanner && (
+              <div
+                role="status"
+                data-testid="profile-bottom-save-banner"
+                className="px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-semibold text-emerald-800 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{saveBanner}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSaveBanner(null)}
+                  className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                  aria-label="Dismiss bottom save notification"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
               <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
                 <input
@@ -901,11 +1152,21 @@ export const MyProfileView: React.FC<MyProfileViewProps> = ({
               </label>
 
               <button
-                type="submit"
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors shadow-xs cursor-pointer"
+                type="button"
+                onClick={persistProfileChanges}
+                data-testid="profile-bottom-save-btn"
+                className={`relative z-10 pointer-events-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold text-white rounded-xl transition-all shadow-xs cursor-pointer active:scale-[0.98] ${
+                  justSaved
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
               >
-                <Save className="w-4 h-4" />
-                <span>Save Profile &amp; Personalize Platform</span>
+                {justSaved ? (
+                  <CheckCircle2 className="w-4 h-4" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                <span>Save Profile</span>
               </button>
             </div>
           </div>

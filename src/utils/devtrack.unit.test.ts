@@ -63,6 +63,16 @@ import {
   buildFormattedRevisionPdfDocument,
   sanitizePdfAsciiText,
   wrapPdfTextLines,
+  createDefaultFocusTimerSettings,
+  resolveFocusPhaseDurationSeconds,
+  recordCompletedFocusSession,
+  computeFocusSessionAnalytics,
+  filterCourseLessons,
+  computeLearnerNextStepRecommendation,
+  computeLearnerAchievements,
+  isLearnerProfileCreated,
+  generateInitialsAvatarDataUrl,
+  sanitizeProfileAvatarUrl,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -1538,7 +1548,126 @@ describe('Unit Tests: Student Onboarding, Personalized Profile & Course-Based Pe
     assert.ok(wrapped.length >= 3);
     assert.ok(wrapped.every(line => line.length <= 35));
   });
+
+  test('11. Focus & Pomodoro Concentration System, In-Course Lesson Search, Next-Step Guidance & Real Activity Achievements', () => {
+    // 1. Focus & Pomodoro Settings + Phase Durations
+    const defaultSettings = createDefaultFocusTimerSettings(90);
+    assert.equal(defaultSettings.studyMinutes, 25);
+    assert.equal(defaultSettings.shortBreakMinutes, 5);
+    assert.equal(defaultSettings.longBreakMinutes, 15);
+    assert.equal(defaultSettings.dailyFocusGoalMinutes, 90);
+
+    assert.equal(resolveFocusPhaseDurationSeconds(defaultSettings, 'study'), 25 * 60);
+    assert.equal(resolveFocusPhaseDurationSeconds(defaultSettings, 'short_break'), 5 * 60);
+    assert.equal(resolveFocusPhaseDurationSeconds(defaultSettings, 'long_break'), 15 * 60);
+
+    // 2. Recording Focus Sessions & Analytics
+    let sessions = recordCompletedFocusSession([], {
+      courseId: 'tracker-dsa',
+      courseTitle: 'DSA Masterclass',
+      lessonId: 'lesson-1',
+      lessonTitle: 'Lec 1: Arrays',
+      phase: 'study',
+      durationMinutes: 25,
+      completedAt: '2026-11-05T09:00:00.000Z',
+      summaryNote: 'Completed Two Pointers Pomodoro block',
+    });
+    sessions = recordCompletedFocusSession(sessions, {
+      courseId: 'tracker-dsa',
+      courseTitle: 'DSA Masterclass',
+      lessonId: 'lesson-2',
+      lessonTitle: 'Lec 2: Pointers',
+      phase: 'study',
+      durationMinutes: 30,
+      completedAt: '2026-11-05T10:00:00.000Z',
+    });
+
+    const analytics = computeFocusSessionAnalytics(sessions, 50, '2026-11-05');
+    assert.equal(analytics.todayFocusMinutes, 55);
+    assert.equal(analytics.studySessionsCount, 2);
+    assert.equal(analytics.dailyGoalPercent, 100);
+    assert.equal(analytics.recentSessions.length, 2);
+
+    // 3. In-Course Lesson Search & Filter
+    const dsaLessons = structuredClone(PRESET_TRACKERS[0].modules.flatMap(m => m.lessons));
+    const allLessons = filterCourseLessons(dsaLessons, '', 'all');
+    assert.equal(allLessons.length, dsaLessons.length);
+
+    const completedOnly = filterCourseLessons(dsaLessons, '', 'completed');
+    assert.ok(completedOnly.every(item => item.lesson.completed));
+
+    const pendingOnly = filterCourseLessons(dsaLessons, '', 'pending');
+    assert.ok(pendingOnly.every(item => !item.lesson.completed));
+
+    const searchByKeyword = filterCourseLessons(dsaLessons, 'Kadane', 'all');
+    assert.equal(searchByKeyword.length, 1);
+    assert.ok(searchByKeyword[0].lesson.title.includes('Kadane'));
+
+    // 4. Learner Next-Step Recommendation (Journey Step 6)
+    const emptyStep = computeLearnerNextStepRecommendation(null, [], 60);
+    assert.equal(emptyStep.actionType, 'add_course');
+
+    const activeStep = computeLearnerNextStepRecommendation(
+      PRESET_TRACKERS[0],
+      [{ date: '2026-11-05', minutesStudied: 20, lessonsCompletedCount: 1 }],
+      60,
+      '2026-11-05'
+    );
+    assert.equal(activeStep.actionType, 'resume_lesson');
+    assert.equal(activeStep.trackerId, PRESET_TRACKERS[0].id);
+    assert.ok(activeStep.headline.includes('Next Step: Lecture'));
+
+    // 5. Real Activity Achievements (Journey Step 5)
+    const achievements = computeLearnerAchievements(
+      PRESET_TRACKERS,
+      [{ date: '2026-11-05', minutesStudied: 150, lessonsCompletedCount: 2 }],
+      4,
+      sessions
+    );
+    assert.equal(achievements.length, 5);
+    assert.equal(achievements.find(a => a.id === 'ach-first-lecture')?.unlocked, true);
+    assert.equal(achievements.find(a => a.id === 'ach-streak-builder')?.unlocked, true);
+    assert.equal(achievements.find(a => a.id === 'ach-deep-focus')?.unlocked, true);
+  });
+
+  test('12. My Profile Custom Photo Upload, Initials Avatar Generator, Non-Blocking URL Resolution & Conditional Registration Visibility', () => {
+    // 1. New student who has not completed profile yet -> isLearnerProfileCreated is false
+    const incompleteProfile = registerNewStudentProfile({
+      name: 'Prateek Singh',
+      email: 'prateek@devtrack.io',
+      role: 'Software Engineer',
+    });
+    assert.equal(isLearnerProfileCreated(incompleteProfile), false);
+
+    // 2. Once learner creates/saves their profile once -> isLearnerProfileCreated is true (hide Register New Student)
+    const completedProfile = {
+      ...incompleteProfile,
+      onboardingCompleted: true,
+    };
+    assert.equal(isLearnerProfileCreated(completedProfile), true);
+
+    // 3. Initials Avatar SVG generator
+    const initialsDataUrl = generateInitialsAvatarDataUrl('Prateek Singh');
+    assert.ok(initialsDataUrl.startsWith('data:image/svg+xml;utf8,'));
+    assert.ok(decodeURIComponent(initialsDataUrl).includes('>PS<'));
+
+    // 4. sanitizeProfileAvatarUrl supports uploaded data:image/... photos, relative preset paths (/src/assets/...), and external links
+    assert.equal(
+      sanitizeProfileAvatarUrl('data:image/jpeg;base64,abc123', '', 'Prateek Singh'),
+      'data:image/jpeg;base64,abc123'
+    );
+    assert.equal(
+      sanitizeProfileAvatarUrl('/src/assets/images/avatar_student_alex_1793187697984.jpg', '', 'Prateek Singh'),
+      '/src/assets/images/avatar_student_alex_1793187697984.jpg'
+    );
+    assert.equal(
+      sanitizeProfileAvatarUrl('/src/assets/images/avatar_student_alex_1793187697984.jpg', 'https://example.com/my-pic.png', 'Prateek Singh'),
+      'https://example.com/my-pic.png'
+    );
+  });
 });
+
+
 
 
 

@@ -40,6 +40,8 @@ import {
   getUserScopedStorageKey,
   parseTimestampToSeconds,
   formatSecondsToTimestamp,
+  isLearnerProfileCreated,
+  DEFAULT_AVATAR_OPTIONS,
 } from './utils/studyWorkspaceLogic';
 import {
   Bell,
@@ -51,11 +53,9 @@ import {
   BookOpen,
   Clock,
   CheckCircle2,
-  Briefcase,
   Shield,
   Users,
   UserPlus,
-  FileText,
 } from 'lucide-react';
 
 export default function App() {
@@ -920,48 +920,60 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Learner Status: Role & Goals, Onboarding, Squads, Schedule, Deep Work, Streak & Sound Toggle */}
+            {/* Right Learner Status: Roadmap, My Profile, Onboarding, Squads, Schedule, Deep Work, Streak & Sound Toggle */}
             <div className="flex flex-wrap items-center gap-3.5 text-slate-600 ml-auto">
               <button
                 type="button"
+                data-testid="nav-tab-curriculum"
+                onClick={() => setActiveTab('curriculum')}
+                className={`flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'curriculum' ? 'text-indigo-600 font-bold' : ''
+                }`}
+                title="Open Course Syllabus & Study Roadmap"
+              >
+                <span>Study Roadmap</span>
+              </button>
+
+              <span aria-hidden="true" className="text-slate-300">·</span>
+
+              <button
+                type="button"
+                data-testid="nav-tab-profile"
                 onClick={() => setActiveTab('profile')}
-                className="flex items-center gap-1.5 text-slate-700 hover:text-indigo-600 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                className={`flex items-center gap-1.5 hover:text-indigo-600 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'profile' ? 'text-indigo-600 font-bold' : 'text-slate-700'
+                }`}
                 title="Open Personalized Student Profile & Recommendations"
               >
-                <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
-                <span>{learnerProfile.name} ({learnerProfile.role})</span>
+                <img
+                  src={learnerProfile.avatarUrl || DEFAULT_AVATAR_OPTIONS[0].url}
+                  alt={learnerProfile.name || 'Profile'}
+                  className="w-5 h-5 rounded-full object-cover border border-indigo-200"
+                />
+                <span>My Profile ({learnerProfile.name})</span>
               </button>
+
+              {!isLearnerProfileCreated(learnerProfile) && (
+                <>
+                  <span aria-hidden="true" className="text-slate-300">·</span>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOnboardingWizard('register')}
+                    className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    title="Create your student profile"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Create Profile</span>
+                  </button>
+                </>
+              )}
 
               <span aria-hidden="true" className="text-slate-300">·</span>
 
               <button
                 type="button"
-                onClick={() => handleOpenOnboardingWizard('register')}
-                className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                title="Sign up a new student or launch the 4-step learner onboarding flow"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Student Onboarding</span>
-              </button>
-
-              <span aria-hidden="true" className="text-slate-300">·</span>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('notes')}
-                className={`flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  activeTab === 'notes' ? 'text-indigo-600 font-bold' : ''
-                }`}
-                title="Open Centralized My Notes Library"
-              >
-                <FileText className="w-3.5 h-3.5 text-indigo-600" />
-                <span>My Notes</span>
-              </button>
-
-              <span aria-hidden="true" className="text-slate-300">·</span>
-
-              <button
-                type="button"
+                data-testid="nav-tab-squads"
                 onClick={() => setActiveTab('squads')}
                 className={`flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   activeTab === 'squads' ? 'text-indigo-600 font-bold' : ''
@@ -976,6 +988,7 @@ export default function App() {
 
               <button
                 type="button"
+                data-testid="nav-tab-schedule"
                 onClick={() => setActiveTab('schedule')}
                 className={`flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   activeTab === 'schedule' ? 'text-indigo-600 font-bold' : ''
@@ -992,6 +1005,7 @@ export default function App() {
 
               <button
                 type="button"
+                data-testid="nav-toggle-deep-work"
                 onClick={handleToggleDeepWork}
                 className="flex items-center gap-1 text-slate-600 hover:text-indigo-600 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 title="Enable Deep Work distraction-free focus mode"

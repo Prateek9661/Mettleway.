@@ -325,17 +325,47 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold mb-1">
-          <GraduationCap className="w-4 h-4" />
-          <span>Professor-Style Concept Mentor &amp; Technical Interview Coach</span>
+      <div className="space-y-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold mb-1">
+            <GraduationCap className="w-4 h-4" />
+            <span>Professor-Style Concept Mentor &amp; Technical Interview Coach</span>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            Learn Like a Beginner with a Professor, Answer Like a Pro in Interviews
+          </h1>
+          <p className="text-xs text-slate-600 mt-1 max-w-3xl">
+            Every doubt is cleared with a relatable real-world example, a beginner-friendly step-by-step whiteboard walkthrough, actual interviewer questions &amp; expected answers, and line-by-line code explanations.
+          </p>
         </div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-          Learn Like a Beginner with a Professor, Answer Like a Pro in Interviews
-        </h1>
-        <p className="text-xs text-slate-600 mt-1 max-w-3xl">
-          Every doubt is cleared with a relatable real-world example, a beginner-friendly step-by-step whiteboard walkthrough, actual interviewer questions &amp; expected answers, and line-by-line code explanations.
-        </p>
+
+        {/* Source Transparency & Next-Step Guidance Banner */}
+        <div
+          data-testid="mentor-transparency-banner"
+          className="bg-slate-100/90 border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs"
+        >
+          <div className="space-y-1 max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2 text-slate-700">
+              <span className="font-bold text-indigo-700">Verified Course Metadata</span>
+              <span aria-hidden="true">·</span>
+              <span>{tracker.title}</span>
+              <span aria-hidden="true">·</span>
+              <span>Instructor: {tracker.instructor}</span>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              <strong>AI Transparency Notice:</strong> Concept explanations, code walkthroughs, and interview questions are generated from your verified course syllabus metadata (<strong>{currentLesson?.title || tracker.title}</strong>) and core subject knowledge. The assistant does not claim access to full private video transcripts.
+            </p>
+          </div>
+          <div className="flex flex-col sm:items-end gap-1 shrink-0">
+            <span className="text-[11px] font-semibold text-slate-500">Recommended Focus Lecture:</span>
+            <span className="font-bold text-slate-900">
+              {currentLesson?.title || tracker.modules[0]?.lessons[0]?.title || tracker.title}
+            </span>
+            <span className="text-[11px] font-mono tabular-nums text-emerald-700 font-semibold">
+              {completedLessons.length} lectures completed · {streakDays}d streak
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Section 1: 1-on-1 Concept Tutor & Doubt Clearance */}

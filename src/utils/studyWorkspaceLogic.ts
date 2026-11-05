@@ -4648,4 +4648,404 @@ export function buildFormattedRevisionPdfDocument(
   };
 }
 
+// ============================================================================
+// 9. FOCUS & CONCENTRATION SYSTEM (POMODORO, SESSION HISTORY & SUMMARIES)
+//    + IN-COURSE LESSON SEARCH, NEXT-STEP ADVISOR & REAL ACHIEVEMENTS
+// ============================================================================
+
+export type FocusTimerPhase = 'study' | 'short_break' | 'long_break';
+
+export interface FocusTimerSettings {
+  studyMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  dailyFocusGoalMinutes: number;
+}
+
+export interface FocusSessionRecord {
+  id: string;
+  userId?: string;
+  courseId: string;
+  courseTitle: string;
+  lessonId: string;
+  lessonTitle: string;
+  phase: FocusTimerPhase;
+  durationMinutes: number;
+  completedAt: string;
+  summaryNote?: string;
+}
+
+export interface FocusSessionAnalytics {
+  todayFocusMinutes: number;
+  dailyGoalMinutes: number;
+  dailyGoalPercent: number;
+  totalSessionsCount: number;
+  studySessionsCount: number;
+  breakSessionsCount: number;
+  totalFocusMinutesAllTime: number;
+  recentSessions: FocusSessionRecord[];
+}
+
+export function createDefaultFocusTimerSettings(
+  dailyTargetMinutes: number = 60
+): FocusTimerSettings {
+  return {
+    studyMinutes: 25,
+    shortBreakMinutes: 5,
+    longBreakMinutes: 15,
+    dailyFocusGoalMinutes: Math.max(15, Number(dailyTargetMinutes) || 60),
+  };
+}
+
+export function resolveFocusPhaseDurationSeconds(
+  settings: FocusTimerSettings,
+  phase: FocusTimerPhase
+): number {
+  if (phase === 'short_break') {
+    return Math.max(1, Math.min(60, Math.round(settings.shortBreakMinutes || 5))) * 60;
+  }
+  if (phase === 'long_break') {
+    return Math.max(1, Math.min(90, Math.round(settings.longBreakMinutes || 15))) * 60;
+  }
+  return Math.max(1, Math.min(180, Math.round(settings.studyMinutes || 25))) * 60;
+}
+
+export function recordCompletedFocusSession(
+  history: FocusSessionRecord[],
+  session: Omit<FocusSessionRecord, 'id' | 'completedAt'> & {
+    id?: string;
+    completedAt?: string;
+  }
+): FocusSessionRecord[] {
+  const safeMinutes = Math.max(1, Math.round(Number(session.durationMinutes) || 1));
+  const record: FocusSessionRecord = {
+    id:
+      session.id ||
+      `focus-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    userId: session.userId,
+    courseId: session.courseId,
+    courseTitle: session.courseTitle,
+    lessonId: session.lessonId,
+    lessonTitle: session.lessonTitle,
+    phase: session.phase,
+    durationMinutes: safeMinutes,
+    completedAt: session.completedAt || new Date().toISOString(),
+    summaryNote: session.summaryNote ? session.summaryNote.trim() : undefined,
+  };
+
+  return [record, ...(history || [])].slice(0, 100);
+}
+
+export function computeFocusSessionAnalytics(
+  history: FocusSessionRecord[],
+  dailyGoalMinutes: number = 60,
+  todayDateStr?: string
+): FocusSessionAnalytics {
+  const safeHistory = Array.isArray(history) ? history : [];
+  const todayPrefix = (todayDateStr || new Date().toISOString()).slice(0, 10);
+
+  let todayFocusMinutes = 0;
+  let studySessionsCount = 0;
+  let breakSessionsCount = 0;
+  let totalFocusMinutesAllTime = 0;
+
+  for (const item of safeHistory) {
+    if (item.phase === 'study') {
+      studySessionsCount++;
+      totalFocusMinutesAllTime += item.durationMinutes;
+      if ((item.completedAt || '').startsWith(todayPrefix)) {
+        todayFocusMinutes += item.durationMinutes;
+      }
+    } else {
+      breakSessionsCount++;
+    }
+  }
+
+  const safeGoal = Math.max(10, Number(dailyGoalMinutes) || 60);
+  const dailyGoalPercent = Math.min(
+    100,
+    Math.round((todayFocusMinutes / safeGoal) * 100)
+  );
+
+  return {
+    todayFocusMinutes,
+    dailyGoalMinutes: safeGoal,
+    dailyGoalPercent,
+    totalSessionsCount: safeHistory.length,
+    studySessionsCount,
+    breakSessionsCount,
+    totalFocusMinutesAllTime,
+    recentSessions: safeHistory.slice(0, 8),
+  };
+}
+
+/**
+ * Filters a course's lessons by search query (title, keyConcepts, practiceTask) and completion status,
+ * returning each matching lesson paired with its original 0-based sequential index so lesson numbering
+ * and video mapping never shift or duplicate.
+ */
+export function filterCourseLessons(
+  lessons: Lesson[],
+  searchQuery: string = '',
+  statusFilter: 'all' | 'pending' | 'completed' = 'all'
+): { lesson: Lesson; originalIndex: number }[] {
+  const safeLessons = Array.isArray(lessons) ? lessons : [];
+  const query = (searchQuery || '').trim().toLowerCase();
+
+  const indexed = safeLessons.map((lesson, originalIndex) => ({
+    lesson,
+    originalIndex,
+  }));
+
+  return indexed.filter(({ lesson, originalIndex }) => {
+    if (statusFilter === 'pending' && lesson.completed) return false;
+    if (statusFilter === 'completed' && !lesson.completed) return false;
+    if (!query) return true;
+
+    const conceptsStr = Array.isArray(lesson.keyConcepts)
+      ? lesson.keyConcepts.join(' ')
+      : '';
+    const haystack = `lecture ${originalIndex + 1} lesson ${originalIndex + 1} ${lesson.title} ${conceptsStr} ${lesson.practiceTask || ''} ${lesson.notes || ''}`.toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
+export interface LearnerNextStepGuidance {
+  headline: string;
+  subtext: string;
+  actionLabel: string;
+  actionType: 'resume_lesson' | 'add_course' | 'review_mentor' | 'start_focus';
+  trackerId?: string;
+  lessonId?: string;
+  lessonIndex?: number;
+  progressPercent: number;
+  todayMinutesStudied: number;
+  dailyTargetMinutes: number;
+}
+
+/**
+ * Computes a deterministic, actionable "What Should I Do Next?" recommendation
+ * based on the learner's active course, completed lessons, and today's logged minutes.
+ */
+export function computeLearnerNextStepRecommendation(
+  tracker: Tracker | null,
+  dailyLogs: DailyLogEntry[] = [],
+  dailyTargetMinutes: number = 60,
+  todayDateStr?: string
+): LearnerNextStepGuidance {
+  const todayPrefix = (todayDateStr || new Date().toISOString()).slice(0, 10);
+  const todayEntry = (dailyLogs || []).find(d => d.date === todayPrefix);
+  const todayMinutesStudied = todayEntry ? todayEntry.minutesStudied : 0;
+  const safeTarget = Math.max(15, Number(dailyTargetMinutes) || 60);
+
+  if (!tracker || !tracker.modules || tracker.modules.length === 0) {
+    return {
+      headline: 'Import Your First Learning Playlist',
+      subtext:
+        'Paste a YouTube playlist or lecture URL to generate an ordered, non-duplicated course roadmap.',
+      actionLabel: 'Import YouTube Playlist',
+      actionType: 'add_course',
+      progressPercent: 0,
+      todayMinutesStudied,
+      dailyTargetMinutes: safeTarget,
+    };
+  }
+
+  const progress = calculateCourseProgress(tracker);
+  const continueInfo = getContinueLearningInfoForTracker(tracker);
+
+  if (progress.completed >= progress.total && progress.total > 0) {
+    return {
+      headline: `Course Completed: ${tracker.title} (100%)`,
+      subtext:
+        'You have completed every lecture in this course! Test your mastery with an AI quiz or import your next playlist.',
+      actionLabel: 'Practice Quiz with AI Assistant',
+      actionType: 'review_mentor',
+      trackerId: tracker.id,
+      progressPercent: 100,
+      todayMinutesStudied,
+      dailyTargetMinutes: safeTarget,
+    };
+  }
+
+  if (continueInfo) {
+    const remainingToday = Math.max(0, safeTarget - todayMinutesStudied);
+    const timeStatus =
+      remainingToday > 0
+        ? `${remainingToday}m remaining to hit today's ${safeTarget}m study goal.`
+        : `Today's ${safeTarget}m study goal achieved! Keep your momentum going.`;
+
+    return {
+      headline: `Next Step: Lecture ${continueInfo.lessonIndex + 1} — ${continueInfo.lessonTitle}`,
+      subtext: `${tracker.title} · ${progress.completed}/${progress.total} lessons completed (${progress.percent}%). ${timeStatus}`,
+      actionLabel: `Continue Lecture ${continueInfo.lessonIndex + 1}`,
+      actionType: 'resume_lesson',
+      trackerId: tracker.id,
+      lessonId: continueInfo.lessonId,
+      lessonIndex: continueInfo.lessonIndex,
+      progressPercent: progress.percent,
+      todayMinutesStudied,
+      dailyTargetMinutes: safeTarget,
+    };
+  }
+
+  return {
+    headline: `Start Learning: ${tracker.title}`,
+    subtext: `Begin Lecture 1 and log your first study session.`,
+    actionLabel: 'Open Lecture 1',
+    actionType: 'resume_lesson',
+    trackerId: tracker.id,
+    progressPercent: progress.percent,
+    todayMinutesStudied,
+    dailyTargetMinutes: safeTarget,
+  };
+}
+
+export interface LearnerAchievement {
+  id: string;
+  title: string;
+  description: string;
+  unlocked: boolean;
+  progressText: string;
+}
+
+/**
+ * Computes real learner achievements strictly from recorded user activity
+ * (completed lessons, timestamped notes, streak days, focus sessions, and courses).
+ */
+export function computeLearnerAchievements(
+  trackers: Tracker[],
+  dailyLogs: DailyLogEntry[] = [],
+  streakDays: number = 0,
+  focusHistory: FocusSessionRecord[] = [],
+  userId?: string
+): LearnerAchievement[] {
+  const safeTrackers = Array.isArray(trackers) ? trackers : [];
+  const totalCompletedLessons = safeTrackers.reduce(
+    (sum, t) => sum + calculateCourseProgress(t).completed,
+    0
+  );
+  const completedCoursesCount = safeTrackers.filter(t => {
+    const p = calculateCourseProgress(t);
+    return p.total > 0 && p.completed === p.total;
+  }).length;
+
+  const allNotes = getAllNotesAcrossTrackers(safeTrackers, { userId });
+  const totalWeeklyMins = (dailyLogs || []).reduce(
+    (sum, d) => sum + (Number(d.minutesStudied) || 0),
+    0
+  );
+  const studyFocusCount = (focusHistory || []).filter(f => f.phase === 'study').length;
+
+  return [
+    {
+      id: 'ach-first-lecture',
+      title: 'Active Lecture Finisher',
+      description: 'Complete at least 3 video lectures across your enrolled courses.',
+      unlocked: totalCompletedLessons >= 3,
+      progressText: `${Math.min(3, totalCompletedLessons)}/3 lessons completed`,
+    },
+    {
+      id: 'ach-note-architect',
+      title: 'Structured Note Architect',
+      description: 'Write at least 3 timestamped lecture notes for revision.',
+      unlocked: allNotes.length >= 3,
+      progressText: `${Math.min(3, allNotes.length)}/3 lecture notes saved`,
+    },
+    {
+      id: 'ach-streak-builder',
+      title: 'Consistent Habit Builder',
+      description: 'Maintain a 3+ day consecutive study streak.',
+      unlocked: streakDays >= 3,
+      progressText: `${streakDays} day streak`,
+    },
+    {
+      id: 'ach-deep-focus',
+      title: 'Deep Focus Practitioner',
+      description: 'Log at least 120 minutes of study activity or complete a Pomodoro focus session.',
+      unlocked: totalWeeklyMins >= 120 || studyFocusCount >= 1,
+      progressText: `${totalWeeklyMins}m logged · ${studyFocusCount} Pomodoro(s)`,
+    },
+    {
+      id: 'ach-course-master',
+      title: 'Course Track Finisher',
+      description: 'Complete 100% of all lectures in an enrolled course playlist.',
+      unlocked: completedCoursesCount >= 1,
+      progressText: `${completedCoursesCount} course(s) 100% completed`,
+    },
+  ];
+}
+
+// ============================================================================
+// 10. PROFILE AVATAR UPLOAD, INITIALS GENERATOR & PROFILE CREATION STATUS
+// ============================================================================
+
+/**
+ * Determines whether the learner has already created/saved their profile at least once.
+ * When true, "Register New Student" is hidden so existing learners are not shown redundant sign-up prompts.
+ */
+export function isLearnerProfileCreated(
+  profile: LearnerProfile | null | undefined
+): boolean {
+  if (!profile) return false;
+  const hasName = Boolean(profile.name && profile.name.trim().length > 0);
+  return hasName && Boolean(profile.onboardingCompleted);
+}
+
+/**
+ * Generates a crisp SVG data URL avatar containing the learner's 1-2 character initials.
+ */
+export function generateInitialsAvatarDataUrl(
+  name: string,
+  bgColor: string = '#4f46e5'
+): string {
+  const cleanName = (name || 'Learner').trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  const initials =
+    parts.length >= 2
+      ? `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+      : (cleanName.slice(0, 2) || 'DT').toUpperCase();
+
+  const safeInitials = initials.replace(/[^A-Z0-9]/g, '') || 'DT';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160"><rect width="160" height="160" rx="32" fill="${bgColor}"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="Inter, system-ui, sans-serif" font-size="60" font-weight="700">${safeInitials}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/**
+ * Safely resolves the learner's profile picture URL without requiring HTML5 type="url" validation.
+ * Supports uploaded device photos (data:image/...), preset paths (/src/assets/...),
+ * external https:// links, or generated initials avatars.
+ */
+export function sanitizeProfileAvatarUrl(
+  currentAvatarUrl: string,
+  customUrlInput?: string,
+  fallbackName: string = 'Learner'
+): string {
+  const trimmedCustom = (customUrlInput || '').trim();
+  if (
+    trimmedCustom &&
+    (trimmedCustom.startsWith('https://') ||
+      trimmedCustom.startsWith('http://') ||
+      trimmedCustom.startsWith('data:image/') ||
+      trimmedCustom.startsWith('/'))
+  ) {
+    return trimmedCustom;
+  }
+
+  const trimmedCurrent = (currentAvatarUrl || '').trim();
+  if (
+    trimmedCurrent &&
+    (trimmedCurrent.startsWith('data:image/') ||
+      trimmedCurrent.startsWith('https://') ||
+      trimmedCurrent.startsWith('http://') ||
+      trimmedCurrent.startsWith('/'))
+  ) {
+    return trimmedCurrent;
+  }
+
+  return DEFAULT_AVATAR_OPTIONS[0]?.url || generateInitialsAvatarDataUrl(fallbackName);
+}
+
+
+
 
