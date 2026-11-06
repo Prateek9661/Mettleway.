@@ -370,96 +370,67 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
   return (
     <div
       id="personal-video-notes-panel"
-      className="pt-5 border-t border-slate-200 space-y-4"
+      className="flex flex-col h-full space-y-2.5"
     >
-      {/* Header Row: Title + Auto-Save Status Indicator + Export & My Notes Library Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-indigo-600" />
-              <span>Course-Based Personal Video Notes</span>
-            </h3>
+      {/* Compact Header Row: Title + Auto-Save Status Indicator + My Notes Library Link */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            <span>Course-Based Personal Video Notes</span>
+          </h3>
 
-            {/* Live Save Status Indicator */}
-            <span
-              data-testid="note-save-status"
-              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${
-                saveStatus === 'saving'
-                  ? 'bg-amber-50 border-amber-200 text-amber-800'
-                  : saveStatus === 'error'
-                  ? 'bg-rose-50 border-rose-200 text-rose-700'
-                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              }`}
-            >
-              {saveStatus === 'saving' ? (
-                <>
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>Auto-saving...</span>
-                </>
-              ) : saveStatus === 'error' ? (
-                <>
-                  <AlertTriangle className="w-3 h-3" />
-                  <span>Local backup active</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  <span>
-                    {saveStatus === 'autosaved' && lastSavedTimeLabel
-                      ? `Auto-saved (${lastSavedTimeLabel})`
-                      : 'Saved to Course & Lecture'}
-                  </span>
-                </>
-              )}
-            </span>
-          </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Connected to <strong>{tracker.title}</strong> →{' '}
-            <strong>
-              Lecture {currentLessonIndex + 1}: {currentLesson.title}
-            </strong>
-            . Notes auto-save while you type.
-          </p>
+          {/* Live Save Status Indicator */}
+          <span
+            data-testid="note-save-status"
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+              saveStatus === 'saving'
+                ? 'bg-amber-50 border-amber-200 text-amber-800'
+                : saveStatus === 'error'
+                ? 'bg-rose-50 border-rose-200 text-rose-700'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            }`}
+          >
+            {saveStatus === 'saving' ? (
+              <>
+                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                <span>Auto-saving...</span>
+              </>
+            ) : saveStatus === 'error' ? (
+              <>
+                <AlertTriangle className="w-2.5 h-2.5" />
+                <span>Local backup active</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                <span>
+                  {saveStatus === 'autosaved' && lastSavedTimeLabel
+                    ? `Auto-saved (${lastSavedTimeLabel})`
+                    : 'Saved to Course & Lecture'}
+                </span>
+              </>
+            )}
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {onOpenNotesLibrary && (
-            <button
-              type="button"
-              onClick={onOpenNotesLibrary}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              title="Open Centralized My Notes Library across all courses"
-            >
-              <FolderTree className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Open My Notes Library</span>
-            </button>
-          )}
+        {onOpenNotesLibrary && (
           <button
             type="button"
-            onClick={handleExportMarkdown}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            title="Download study notes as Markdown (.md)"
+            onClick={onOpenNotesLibrary}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            title="Open Centralized My Notes Library across all courses"
           >
-            <Download className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Export Notes (.md)</span>
+            <FolderTree className="w-3 h-3 text-indigo-600" />
+            <span>Open My Notes Library</span>
           </button>
-          <button
-            type="button"
-            onClick={handleExportJson}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            title="Download study notes as JSON (.json)"
-          >
-            <FileJson className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Export (.json)</span>
-          </button>
-        </div>
+        )}
       </div>
 
       {exportStatusMessage && (
         <div
           role="status"
-          className="px-3.5 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-medium text-emerald-800 flex items-center justify-between"
+          className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] font-medium text-emerald-800 flex items-center justify-between"
         >
           <span>{exportStatusMessage}</span>
           <button
@@ -468,7 +439,7 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
             className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
             aria-label="Dismiss export status"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-3 h-3" />
           </button>
         </div>
       )}
@@ -476,83 +447,71 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
       {/* Rich Lecture Note Composer (Auto-Saves with Debouncing + Supports Headings, Bullets, Tags, Timestamps & Code Snippets) */}
       <form
         onSubmit={handleCreateNoteSubmit}
-        className="p-4 bg-slate-50/90 border border-slate-200 rounded-xl space-y-3"
+        className="p-3 bg-slate-50/90 border border-slate-200 rounded-xl space-y-2"
       >
-        {/* Row 1: Heading + Timestamp + Concept Tag + Bookmark */}
-        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-          <div className="sm:col-span-4">
+        {/* Row 1: Heading + Timestamp ("02:15 Now") + Concept Tag + Bookmark */}
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+          <div className="sm:col-span-5">
             <input
               type="text"
               value={noteHeading}
               onChange={e => setNoteHeading(e.target.value)}
               placeholder="Note Heading (e.g. Binary Search Invariant)"
               aria-label="Note heading"
-              className="w-full px-3 py-2 text-xs font-semibold bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+              className="w-full px-2.5 py-1.5 text-xs font-semibold bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
             />
           </div>
 
-          {/* Timestamp Input + Quick Capture */}
-          <div className="sm:col-span-3 flex items-center gap-1.5">
+          {/* Timestamp Input + Quick Capture ("02:15 Now") */}
+          <div className="sm:col-span-4 flex items-center gap-1">
             <div className="relative flex-1">
-              <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              <Clock className="w-3 h-3 text-slate-400 absolute left-2 top-2" />
               <input
                 type="text"
                 value={timestampInput}
                 onChange={e => setTimestampInput(e.target.value)}
                 placeholder="MM:SS"
                 aria-label="Video timestamp MM:SS"
-                className="w-full pl-7 pr-2 py-2 text-xs font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+                className="w-full pl-6 pr-1.5 py-1.5 text-xs font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
               />
             </div>
             <button
               type="button"
               onClick={handleCaptureCurrentTimestamp}
-              className="px-2.5 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              className="px-2 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
               title="Capture current study timer timestamp"
             >
               Now
             </button>
           </div>
 
-          {/* Concept Tag Input */}
-          <div className="sm:col-span-3">
-            <input
-              type="text"
-              value={conceptTag}
-              onChange={e => setConceptTag(e.target.value)}
-              placeholder="Concept tag"
-              aria-label="Concept tag"
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
-            />
-          </div>
-
           {/* Bookmark Important Concept Toggle */}
-          <div className="sm:col-span-2 flex items-center">
+          <div className="sm:col-span-3 flex items-center">
             <button
               type="button"
               onClick={() => setIsBookmarked(prev => !prev)}
               aria-pressed={isBookmarked}
-              className={`w-full flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 isBookmarked
                   ? 'bg-amber-50 border-amber-300 text-amber-800'
                   : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
               }`}
             >
               <Bookmark
-                className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-500 text-amber-600' : ''}`}
+                className={`w-3 h-3 ${isBookmarked ? 'fill-amber-500 text-amber-600' : ''}`}
               />
               <span>{isBookmarked ? 'Saved' : 'Bookmark'}</span>
             </button>
           </div>
         </div>
 
-        {/* Row 2: Formatting Toolbar + Tag Pills (`Important`, `Revision`, `Exam`, `Formula`, `Interview`, `Code`, `Doubt`) */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+        {/* Row 2: Formatting Toolbar + Quick Hashtags (#Important, #Revision, #Exam, #Formula, #Interview, #Code, #Doubt) */}
+        <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-1">
             <button
               type="button"
               onClick={() => handleInsertFormatting('### ')}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-md cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-md cursor-pointer"
               title="Insert section heading"
             >
               <Heading className="w-3 h-3" />
@@ -561,7 +520,7 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
             <button
               type="button"
               onClick={() => handleInsertFormatting('• ')}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-md cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-md cursor-pointer"
               title="Insert bullet point"
             >
               <List className="w-3 h-3" />
@@ -570,7 +529,7 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
             <button
               type="button"
               onClick={() => handleInsertFormatting('**Key Concept:** ')}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-md cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-md cursor-pointer"
               title="Insert bold callout"
             >
               <Bold className="w-3 h-3" />
@@ -579,7 +538,7 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
             <button
               type="button"
               onClick={() => setShowCodeEditor(prev => !prev)}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md border cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md border cursor-pointer ${
                 showCodeEditor
                   ? 'bg-slate-900 border-slate-900 text-white'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
@@ -598,7 +557,7 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
                   key={tag}
                   type="button"
                   onClick={() => handleToggleTag(tag)}
-                  className={`px-2 py-0.5 text-[11px] font-semibold rounded-md border transition-colors cursor-pointer ${
+                  className={`px-1.5 py-0.5 text-[10px] font-semibold rounded-md border transition-colors cursor-pointer ${
                     active
                       ? 'bg-indigo-600 border-indigo-600 text-white'
                       : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
@@ -617,15 +576,15 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
             rows={2}
             value={noteContent}
             onChange={e => setNoteContent(e.target.value)}
-            placeholder="Write your lecture notes, bullet points, or formulas while watching... (Automatically saves as you type)"
+            placeholder="Write your lecture notes, bullet points, or formulas while watching... (Auto-saves as you type)"
             aria-label="Personal video note content"
-            className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900 leading-relaxed"
+            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900 leading-relaxed resize-none"
           />
         </div>
 
         {/* Optional Code Snippet Box */}
         {showCodeEditor && (
-          <div className="space-y-1.5 p-3 bg-slate-900 rounded-xl border border-slate-800">
+          <div className="space-y-1.5 p-2.5 bg-slate-900 rounded-xl border border-slate-800">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
                 <Code2 className="w-3.5 h-3.5 text-indigo-400" />
@@ -644,39 +603,57 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
               </select>
             </div>
             <textarea
-              rows={3}
+              rows={2}
               value={codeSnippet}
               onChange={e => setCodeSnippet(e.target.value)}
               placeholder="// Paste or write code from the lecture here..."
               aria-label="Lecture code snippet"
-              className="w-full p-2.5 text-xs font-mono bg-slate-950 text-emerald-300 border border-slate-800 rounded-lg focus:outline-none"
+              className="w-full p-2 text-xs font-mono bg-slate-950 text-emerald-300 border border-slate-800 rounded-lg focus:outline-none"
             />
           </div>
         )}
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
-          <span className="text-[11px] text-slate-500">
-            Tip: Notes auto-save in real time. Click <strong>Save Video Note</strong> to lock this note and start a new entry.
-          </span>
+        {/* Action Row Right Below Note Input: "+ Save Video Note" + "Export Notes (.md)" + "Export (.json)" */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
           <button
             type="submit"
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            data-testid="save-video-note-btn"
+            className="inline-flex items-center justify-center gap-1 px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Save Video Note</span>
+            <span>+ Save Video Note</span>
           </button>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleExportMarkdown}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="Download study notes as Markdown (.md)"
+            >
+              <Download className="w-3 h-3 text-indigo-600" />
+              <span>Export Notes (.md)</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportJson}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="Download study notes as JSON (.json)"
+            >
+              <FileJson className="w-3 h-3 text-emerald-600" />
+              <span>Export (.json)</span>
+            </button>
+          </div>
         </div>
       </form>
 
-      {/* Search, Scope & Tag Filter Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        {/* Interactive Scope Filter Tabs */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+      {/* Directly Below Save Button: Scope Tabs ("This Video", "All Course Notes", "Bookmarked") + Search */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-1.5">
+          <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg">
             <button
               type="button"
               onClick={() => setScopeFilter('current_video')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 scopeFilter === 'current_video'
                   ? 'bg-white text-slate-900 shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -687,7 +664,7 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
             <button
               type="button"
               onClick={() => setScopeFilter('all_course')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 scopeFilter === 'all_course'
                   ? 'bg-white text-slate-900 shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -698,7 +675,7 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
             <button
               type="button"
               onClick={() => setScopeFilter('bookmarked')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 ${
+              className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 ${
                 scopeFilter === 'bookmarked'
                   ? 'bg-white text-amber-800 shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -709,39 +686,43 @@ export const PersonalVideoNotesPanel: React.FC<PersonalVideoNotesPanelProps> = (
             </button>
           </div>
 
-          <select
-            value={tagFilter}
-            onChange={e => setTagFilter(e.target.value)}
-            aria-label="Filter lecture notes by tag"
-            className="px-2.5 py-1.5 text-xs font-semibold bg-slate-100 border border-slate-200 rounded-lg text-slate-700 cursor-pointer"
-          >
-            <option value="all">All Tags</option>
-            {NOTE_TAG_PRESETS.map(t => (
-              <option key={t} value={t}>
-                #{t}
-              </option>
-            ))}
-          </select>
-        </div>
+          <div className="flex items-center gap-1.5 flex-1 min-w-[140px]">
+            <select
+              value={tagFilter}
+              onChange={e => setTagFilter(e.target.value)}
+              aria-label="Filter lecture notes by tag"
+              className="px-2 py-1 text-[11px] font-semibold bg-slate-100 border border-slate-200 rounded-lg text-slate-700 cursor-pointer"
+            >
+              <option value="all">All Tags</option>
+              {NOTE_TAG_PRESETS.map(t => (
+                <option key={t} value={t}>
+                  #{t}
+                </option>
+              ))}
+            </select>
 
-        {/* Search Input */}
-        <div className="relative flex-1 sm:max-w-xs">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search notes, headings, code, or tags..."
-            aria-label="Search personal notes"
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
-          />
+            <div className="relative flex-1">
+              <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search notes..."
+                aria-label="Search personal notes"
+                className="w-full pl-7 pr-2 py-1 text-[11px] bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Notes List */}
-      <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white">
+      {/* Scrollable Saved Timestamped Notes List */}
+      <div
+        data-testid="live-notes-scrollable-list"
+        className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white overflow-y-auto max-h-[210px] flex-1 min-h-[110px]"
+      >
         {filteredNotes.length === 0 ? (
-          <div className="p-6 text-center space-y-1">
+          <div className="p-4 text-center space-y-1">
             <p className="text-xs font-semibold text-slate-700">
               {searchQuery
                 ? 'No notes match your search query'

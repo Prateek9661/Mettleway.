@@ -9,6 +9,8 @@ import {
   buildDynamicTrackerFromInput,
   parseYouTubeSourceUrl,
   ScrapedPlaylistVideoItem,
+  buildConceptMentorSystemPrompt,
+  normalizeConceptMentorMode,
 } from './src/utils/studyWorkspaceLogic';
 import {
   discoverYouTubePlaylist,
@@ -560,14 +562,15 @@ Write in simple, everyday, easy-to-understand language:
   }
 });
 
-// Endpoint: Concept Tutor / Doubt Clearance (Professor-to-Beginner + Real Interviewer Expectations + Line-by-Line Code)
+// Endpoint: Concept Tutor / Doubt Clearance (Professor Mode [Beginner] vs Technical Mode [Deep Dive + Code])
 app.post('/api/concept-tutor', async (req, res) => {
   const startTime = Date.now();
   try {
     const { topic, currentLesson, question, codeSnippet, explanationStyle = 'simple' } = req.body;
+    const normalizedMode = normalizeConceptMentorMode(explanationStyle);
 
     // Check fast in-memory cache
-    const cacheKey = `${topic}::${currentLesson}::${explanationStyle}::${(question || '').toLowerCase().trim()}::${(codeSnippet || '').trim()}`;
+    const cacheKey = `${topic}::${currentLesson}::${normalizedMode}::${(question || '').toLowerCase().trim()}::${(codeSnippet || '').trim()}`;
     const cached = tutorCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
       return res.json({
@@ -578,94 +581,15 @@ app.post('/api/concept-tutor', async (req, res) => {
       });
     }
 
-    const isInterviewMode = explanationStyle === 'interview';
+    const isTechnicalMode = normalizedMode === 'technical';
 
-    const prompt = isInterviewMode
-      ? `Topic: ${topic}
-Current Lesson: ${currentLesson}
-Candidate's Question: "${question}"
-${codeSnippet ? `Candidate's Code:\n\`\`\`\n${codeSnippet}\n\`\`\`` : ''}
-
-You are a Senior FAANG Technical Interviewer & CS Professor.
-The learner has selected INTERVIEW MODE. Answer with the exact question an interviewer actually asks on this topic, the structured answer they expect from a top candidate, a real-world example, and clean optimal code with line-by-line explanations.
-Return ONLY valid JSON matching this exact structure:
-{
-  "directAnswer": "2 clear sentences giving the high-conviction interview summary of this concept.",
-  "realWorldAnalogy": "Real-World Example: 2 relatable sentences showing how this works in everyday life.",
-  "interviewPerspective": {
-    "actualInterviewQuestion": "The exact coding or conceptual question a real technical interviewer asks on this topic.",
-    "whatInterviewerExpects": "The exact talking points, brute-force to optimal progression, and edge cases the interviewer expects in your answer.",
-    "followUpTrap": "1 classic follow-up trap question interviewers ask next and how to answer it."
-  },
-  "stepByStepBreakdown": [
-    "Step 1 of the optimal interview approach",
-    "Step 2 of the optimal interview approach",
-    "Step 3 of the optimal interview approach"
-  ],
-  "complexitySimple": {
-    "time": "O(...) — exact interview justification",
-    "space": "O(...) — exact memory trade-off justification"
-  },
-  "commonMistake": "1 sentence on the #1 mistake candidates make in interviews on this topic.",
-  "detailedExplanation": "2 sentences summarizing why this optimal solution wins in an interview.",
-  "codeExample": {
-    "language": "C++ or JavaScript or Python",
-    "code": "6 to 10 lines of clean, optimal interview-ready code",
-    "explanation": "1 sentence summary of what the code does",
-    "lineByLine": [
-      { "line": "exact code line 1", "explanation": "clear explanation of why this line is needed" },
-      { "line": "exact code line 2", "explanation": "clear explanation of why this line is needed" },
-      { "line": "exact code line 3", "explanation": "clear explanation of why this line is needed" },
-      { "line": "exact code line 4", "explanation": "clear explanation of why this line is needed" }
-    ]
-  },
-  "quickCheckQuestion": {
-    "question": "1 interview-style multiple-choice question",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correctIndex": 0,
-    "explanation": "1 sentence explaining why that option is correct"
-  }
-}`
-      : `Topic: ${topic}
-Current Lesson: ${currentLesson}
-Student's Question: "${question}"
-${codeSnippet ? `Student's Code:\n\`\`\`\n${codeSnippet}\n\`\`\`` : ''}
-
-You are a warm, patient, world-class University Computer Science Professor teaching a complete beginner student.
-Explain the concept using a vivid Real-World Example, simple everyday words (zero heavy jargon), a whiteboard step-by-step walkthrough, and where code helps, explain each line of code simply. Do NOT include interview jargon—focus 100% on making the concept crystal clear for a beginner learner.
-Return ONLY valid JSON matching this exact structure:
-{
-  "directAnswer": "2 warm, crystal-clear sentences where you (the Professor) directly answer the beginner student's question in plain English.",
-  "realWorldAnalogy": "Real-World Example: 2-3 relatable sentences (e.g. numbered gym lockers, coffee shop line, dictionary pages, nesting dolls) showing how this works in everyday life.",
-  "stepByStepBreakdown": [
-    "Step 1 in plain beginner language",
-    "Step 2 in plain beginner language",
-    "Step 3 in plain beginner language"
-  ],
-  "complexitySimple": {
-    "time": "O(...) — simple beginner-friendly explanation of speed",
-    "space": "O(...) — simple beginner-friendly explanation of memory used"
-  },
-  "commonMistake": "1 friendly sentence warning about the #1 beginner mistake and how to avoid it.",
-  "detailedExplanation": "2 sentences summarizing the core takeaway for the student.",
-  "codeExample": {
-    "language": "C++ or JavaScript or Python",
-    "code": "6 to 10 lines of clean, beginner-friendly code",
-    "explanation": "1 sentence summary of what the code does",
-    "lineByLine": [
-      { "line": "exact code line 1", "explanation": "plain-English explanation for a beginner student" },
-      { "line": "exact code line 2", "explanation": "plain-English explanation for a beginner student" },
-      { "line": "exact code line 3", "explanation": "plain-English explanation for a beginner student" },
-      { "line": "exact code line 4", "explanation": "plain-English explanation for a beginner student" }
-    ]
-  },
-  "quickCheckQuestion": {
-    "question": "1 beginner-friendly multiple-choice question testing the concept",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correctIndex": 0,
-    "explanation": "1 encouraging sentence explaining why that option is right"
-  }
-}`;
+    const prompt = buildConceptMentorSystemPrompt({
+      mode: normalizedMode,
+      topic: topic || 'Computer Science',
+      currentLesson: currentLesson || 'Core Fundamentals',
+      question: question || currentLesson || 'Explain this concept',
+      codeSnippet: codeSnippet || '',
+    });
 
     const response = await withTimeout(
       ai.models.generateContent({
@@ -681,8 +605,16 @@ Return ONLY valid JSON matching this exact structure:
 
     const parsed = JSON.parse(response.text || '{}');
 
-    if (!isInterviewMode) {
+    if (!isTechnicalMode) {
+      delete parsed.technicalDeepDive;
       delete parsed.interviewPerspective;
+    } else if (parsed.technicalDeepDive && !parsed.interviewPerspective) {
+      // Populate backwards-compatible alias if needed by legacy consumers
+      parsed.interviewPerspective = {
+        actualInterviewQuestion: parsed.technicalDeepDive.exactDefinition,
+        whatInterviewerExpects: parsed.technicalDeepDive.memoryAndExecutionBehavior,
+        followUpTrap: parsed.technicalDeepDive.syntaxAndEdgeCases,
+      };
     }
 
     if (Array.isArray(parsed.stepByStepBreakdown)) {
@@ -710,17 +642,20 @@ Return ONLY valid JSON matching this exact structure:
   } catch (error: any) {
     console.warn('Upstream AI tutor fallback activated:', error?.message || error);
     const { topic, currentLesson, question, explanationStyle = 'simple' } = req.body || {};
-    const isInterviewMode = explanationStyle === 'interview';
+    const normalizedMode = normalizeConceptMentorMode(explanationStyle);
+    const isTechnicalMode = normalizedMode === 'technical';
     const fallbackData = buildSmartConceptFallback(
       topic || 'Computer Science',
       undefined,
       question || currentLesson || 'Core Concept',
-      'DSA'
+      'DSA',
+      normalizedMode
     );
-    if (!isInterviewMode) {
+    if (!isTechnicalMode) {
+      delete fallbackData.technicalDeepDive;
       delete fallbackData.interviewPerspective;
     }
-    const cacheKey = `${topic}::${currentLesson}::${explanationStyle}::${(question || '').toLowerCase().trim()}::${(req.body?.codeSnippet || '').trim()}`;
+    const cacheKey = `${topic}::${currentLesson}::${normalizedMode}::${(question || '').toLowerCase().trim()}::${(req.body?.codeSnippet || '').trim()}`;
     tutorCache.set(cacheKey, { data: fallbackData, timestamp: Date.now() });
 
     return res.json({

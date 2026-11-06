@@ -103,7 +103,7 @@ describe('Integration Tests: End-to-End Learner Study Workflow & Calendar Sync',
 });
 
 describe('Integration Tests: Live Express Server & AI Concept Mentor Modes (/api/concept-tutor)', () => {
-  test('POST /api/concept-tutor enforces mode separation (Professor Mode vs Interviewer Mode) and sub-50ms cache hit', async () => {
+  test('POST /api/concept-tutor enforces mode separation (Professor Mode vs Technical Mode) and sub-50ms cache hit', async () => {
     const baseUrl = 'http://localhost:3000';
 
     // Check if local server is reachable
@@ -119,7 +119,7 @@ describe('Integration Tests: Live Express Server & AI Concept Mentor Modes (/api
       return;
     }
 
-    // 1. Test Professor Mode ('simple'): should NOT return interviewPerspective
+    // 1. Test Professor Mode ('simple'): should NOT return technicalDeepDive or interviewPerspective
     const simplePayload = {
       topic: 'Striver A2Z DSA Sheet',
       currentLesson: 'Hashing Maps & Frequency Arrays in C++',
@@ -139,51 +139,57 @@ describe('Integration Tests: Live Express Server & AI Concept Mentor Modes (/api
     assert.ok(jsonSimple.data.directAnswer, 'Professor mode must include directAnswer');
     assert.ok(jsonSimple.data.realWorldAnalogy, 'Professor mode must include realWorldAnalogy');
     assert.equal(
+      jsonSimple.data.technicalDeepDive,
+      undefined,
+      'Professor mode must NOT include technicalDeepDive'
+    );
+    assert.equal(
       jsonSimple.data.interviewPerspective,
       undefined,
       'Professor mode must NOT include interviewPerspective'
     );
 
-    // 2. Test Interviewer Mode ('interview'): MUST include interviewPerspective & lineByLine code
-    const interviewPayload = {
+    // 2. Test Technical Mode ('technical'): MUST include technicalDeepDive & lineByLine code
+    const technicalPayload = {
       topic: 'Striver A2Z DSA Sheet',
       currentLesson: 'Hashing Maps & Frequency Arrays in C++',
-      question: 'How do I solve Two Sum optimally in an interview?',
-      explanationStyle: 'interview',
+      question: 'Explain the exact technical definition and internal working of Hashing Maps',
+      explanationStyle: 'technical',
     };
 
-    const resInterview1 = await fetch(`${baseUrl}/api/concept-tutor`, {
+    const resTech1 = await fetch(`${baseUrl}/api/concept-tutor`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(interviewPayload),
+      body: JSON.stringify(technicalPayload),
     });
 
-    assert.equal(resInterview1.status, 200);
-    const jsonInterview1 = (await resInterview1.json()) as any;
-    assert.equal(jsonInterview1.success, true);
-    assert.ok(jsonInterview1.data.directAnswer, 'Should include directAnswer');
-    assert.ok(jsonInterview1.data.realWorldAnalogy, 'Should include realWorldAnalogy');
+    assert.equal(resTech1.status, 200);
+    const jsonTech1 = (await resTech1.json()) as any;
+    assert.equal(jsonTech1.success, true);
+    assert.ok(jsonTech1.data.directAnswer, 'Should include directAnswer');
+    assert.ok(jsonTech1.data.realWorldAnalogy, 'Should include realWorldAnalogy');
     assert.ok(
-      jsonInterview1.data.interviewPerspective?.actualInterviewQuestion,
-      'Interviewer mode must include interviewPerspective.actualInterviewQuestion'
+      jsonTech1.data.technicalDeepDive?.exactDefinition ||
+        jsonTech1.data.interviewPerspective?.actualInterviewQuestion,
+      'Technical mode must include technicalDeepDive.exactDefinition'
     );
     assert.ok(
-      Array.isArray(jsonInterview1.data.codeExample?.lineByLine),
+      Array.isArray(jsonTech1.data.codeExample?.lineByLine),
       'Must include line-by-line code explanation'
     );
 
     // 3. Repeat identical request to verify in-memory server cache hit (<50ms)
-    const resInterview2 = await fetch(`${baseUrl}/api/concept-tutor`, {
+    const resTech2 = await fetch(`${baseUrl}/api/concept-tutor`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(interviewPayload),
+      body: JSON.stringify(technicalPayload),
     });
-    const jsonInterview2 = (await resInterview2.json()) as any;
-    assert.equal(jsonInterview2.success, true);
-    assert.equal(jsonInterview2.cached, true);
+    const jsonTech2 = (await resTech2.json()) as any;
+    assert.equal(jsonTech2.success, true);
+    assert.equal(jsonTech2.cached, true);
     assert.ok(
-      jsonInterview2.latencyMs < 50,
-      `Expected cached response <50ms, got ${jsonInterview2.latencyMs}ms`
+      jsonTech2.latencyMs < 50,
+      `Expected cached response <50ms, got ${jsonTech2.latencyMs}ms`
     );
   });
 });

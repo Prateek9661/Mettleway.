@@ -195,6 +195,8 @@ export interface AIRecapData {
   mentorAdvice: string;
 }
 
+export type ConceptMentorStyle = 'simple' | 'technical' | 'interview';
+
 export interface ConceptTutorAnswer {
   directAnswer: string;
   realWorldAnalogy?: string;
@@ -205,6 +207,11 @@ export interface ConceptTutorAnswer {
   };
   commonMistake?: string;
   detailedExplanation: string;
+  technicalDeepDive?: {
+    exactDefinition: string;
+    memoryAndExecutionBehavior: string;
+    syntaxAndEdgeCases?: string;
+  };
   interviewPerspective?: {
     actualInterviewQuestion: string;
     whatInterviewerExpects: string;

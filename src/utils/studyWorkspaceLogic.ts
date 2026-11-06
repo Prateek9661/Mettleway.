@@ -5046,6 +5046,197 @@ export function sanitizeProfileAvatarUrl(
   return DEFAULT_AVATAR_OPTIONS[0]?.url || generateInitialsAvatarDataUrl(fallbackName);
 }
 
+// ============================================================================
+// 11. SIDE-BY-SIDE VIDEO LEARNING WORKSPACE HELPERS (TABS & INLINE MENTOR)
+// ============================================================================
 
+export type WorkspaceSideTab = 'notes' | 'mentor' | 'playlist';
 
+/**
+ * Formats the 3rd tab label in the right-column workspace panel, e.g., "Playlist (1/9)" or "Playlist (3/8)".
+ */
+export function formatPlaylistTabLabel(
+  currentLessonIndex: number,
+  totalLessons: number
+): string {
+  const safeTotal = Math.max(1, totalLessons || 1);
+  const safeCurrent = Math.min(safeTotal, Math.max(1, (currentLessonIndex || 0) + 1));
+  return `Playlist (${safeCurrent}/${safeTotal})`;
+}
+
+/**
+ * Generates a lesson-grounded prompt when the learner clicks one of the 3 inline quick buttons
+ * in Tab 2 ("Ask Professor Mentor"):
+ * - 'explain' -> "Explain Current Topic Simply"
+ * - 'code' -> "Give Code Example"
+ * - 'quiz' -> "Quiz Me on This Lecture"
+ */
+export function buildInlineProfessorQuickPrompt(
+  action: 'explain' | 'code' | 'quiz',
+  lessonTitle: string,
+  keyConcepts: string[] = []
+): string {
+  const cleanTitle = (lessonTitle || 'this lecture').trim();
+  const focusConcept = keyConcepts[0] || cleanTitle;
+
+  switch (action) {
+    case 'explain':
+      return `Explain "${cleanTitle}" (${focusConcept}) simply for a beginner with a real-world analogy and step-by-step walkthrough.`;
+    case 'code':
+      return `Give a clean code example for "${cleanTitle}" (${focusConcept}) and explain each line of code.`;
+    case 'quiz':
+      return `Quiz me on "${cleanTitle}" (${focusConcept}) with a quick concept-check question and technical insight.`;
+  }
+}
+
+// ============================================================================
+// 12. 1-ON-1 CONCEPT & TECHNICAL MENTOR HELPERS (PROFESSOR MODE VS TECHNICAL MODE)
+// ============================================================================
+
+export type ConceptMentorMode = 'simple' | 'technical';
+
+export function normalizeConceptMentorMode(rawStyle?: string): ConceptMentorMode {
+  if (rawStyle === 'technical' || rawStyle === 'interview') {
+    return 'technical';
+  }
+  return 'simple';
+}
+
+/**
+ * Dynamically builds the 1-click quick prompt chips for the Concept Mentor based on the active mode:
+ * - Professor Mode ('simple'): Beginner-friendly prompts using everyday analogies and tiny examples.
+ * - Technical Mode ('technical'): Deep-dive CS & software engineering prompts covering exact definitions,
+ *   internal working, syntax rules, edge cases, memory behavior, complexity analysis, and pitfalls.
+ */
+export function buildConceptMentorQuickPrompts(
+  mode: string,
+  currentLessonTitle: string,
+  keyConcepts: string[] = []
+): string[] {
+  const cleanLecture = (currentLessonTitle || 'this topic').trim();
+  const firstConcept = keyConcepts[0] || cleanLecture;
+  const secondConcept = keyConcepts[1] || 'time complexity';
+  const normalizedMode = normalizeConceptMentorMode(mode);
+
+  if (normalizedMode === 'technical') {
+    return [
+      `Explain the exact technical definition and internal working of ${cleanLecture}`,
+      `Show syntax rules, edge cases, and memory behavior for ${cleanLecture}`,
+      `Provide a clean code implementation with technical comments and complexity analysis`,
+      `What are the common technical pitfalls and best practices in ${cleanLecture}?`,
+    ];
+  }
+
+  return [
+    `Teach me ${cleanLecture} like I am a beginner with a real-world analogy`,
+    `Walk me through a tiny step-by-step example for ${cleanLecture}`,
+    `Show simple beginner code for ${firstConcept} and explain each line`,
+    `Why is ${secondConcept} faster than brute force in everyday words?`,
+  ];
+}
+
+/**
+ * Builds the strict AI system instruction & prompt sent to the model for Professor Mode (Beginner)
+ * vs Technical Mode (Deep Dive + Code).
+ */
+export function buildConceptMentorSystemPrompt(params: {
+  mode: string;
+  topic: string;
+  currentLesson: string;
+  question: string;
+  codeSnippet?: string;
+}): string {
+  const { mode, topic, currentLesson, question, codeSnippet = '' } = params;
+  const normalizedMode = normalizeConceptMentorMode(mode);
+  const trimmedCode = codeSnippet.trim();
+
+  if (normalizedMode === 'technical') {
+    return `Topic: ${topic}
+Current Lesson: ${currentLesson}
+Engineer's Technical Question: "${question}"
+${trimmedCode ? `Engineer's Code:\n\`\`\`\n${trimmedCode}\n\`\`\`` : ''}
+
+You are a Senior Computer Science & Software Engineering Systems Architect.
+The learner has selected TECHNICAL MODE (Deep Dive + Code). Explain the exact concept from a strict computer science and software engineering perspective. Provide precise technical definitions, under-the-hood memory and execution behavior, syntax rules, time & space complexity (Big-O where applicable), edge cases, and production-ready code implementations.
+Return ONLY valid JSON matching this exact structure:
+{
+  "directAnswer": "2 precise sentences giving the strict computer science and software engineering definition and internal working of this concept.",
+  "realWorldAnalogy": "Architectural Mental Model: 2 concise sentences connecting this mechanism to low-level system architecture or runtime execution.",
+  "technicalDeepDive": {
+    "exactDefinition": "The exact formal computer science definition, invariants, and internal algorithmic mechanics of this topic.",
+    "memoryAndExecutionBehavior": "Under-the-hood memory layout (stack vs heap allocation, CPU cache locality, mutability, pointer/reference semantics) and runtime execution behavior.",
+    "syntaxAndEdgeCases": "Strict language syntax rules, boundary conditions, overflow/null invariants, and production edge cases to handle."
+  },
+  "stepByStepBreakdown": [
+    "Step 1 of the internal execution and algorithmic workflow",
+    "Step 2 of the internal execution and algorithmic workflow",
+    "Step 3 of the internal execution and algorithmic workflow"
+  ],
+  "complexitySimple": {
+    "time": "O(...) — rigorous asymptotic time complexity analysis (average vs worst-case)",
+    "space": "O(...) — auxiliary memory allocation and space complexity trade-off"
+  },
+  "commonMistake": "1 sentence on the #1 technical pitfall, memory hazard, or subtle bug in production code.",
+  "detailedExplanation": "2 sentences summarizing the engineering best practices and performance trade-offs.",
+  "codeExample": {
+    "language": "C++ or JavaScript or Python",
+    "code": "6 to 10 lines of clean, production-ready code with technical comments",
+    "explanation": "1 sentence technical summary of the implementation and its invariants",
+    "lineByLine": [
+      { "line": "exact code line 1", "explanation": "technical explanation of execution semantics and memory impact" },
+      { "line": "exact code line 2", "explanation": "technical explanation of execution semantics and memory impact" },
+      { "line": "exact code line 3", "explanation": "technical explanation of execution semantics and memory impact" },
+      { "line": "exact code line 4", "explanation": "technical explanation of execution semantics and memory impact" }
+    ]
+  },
+  "quickCheckQuestion": {
+    "question": "1 rigorous technical multiple-choice question testing internal execution, memory behavior, or complexity",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctIndex": 0,
+    "explanation": "1 technical sentence explaining why that option is correct"
+  }
+}`;
+  }
+
+  return `Topic: ${topic}
+Current Lesson: ${currentLesson}
+Student's Question: "${question}"
+${trimmedCode ? `Student's Code:\n\`\`\`\n${trimmedCode}\n\`\`\`` : ''}
+
+You are a friendly, patient University Professor teaching an absolute beginner student.
+The learner has selected PROFESSOR MODE (Beginner). Explain the concept using simple everyday language, zero heavy jargon, a relatable real-world analogy, and a tiny step-by-step beginner example. Where code helps, show simple beginner code and explain each line in plain English.
+Return ONLY valid JSON matching this exact structure:
+{
+  "directAnswer": "2 warm, crystal-clear sentences where you (the friendly Professor) directly answer the beginner student's question in simple everyday language with zero heavy jargon.",
+  "realWorldAnalogy": "Real-World Analogy: 2-3 relatable sentences (e.g. numbered gym lockers, coffee shop line, dictionary pages, nesting dolls) showing how this works in everyday life.",
+  "stepByStepBreakdown": [
+    "Step 1 of a tiny step-by-step beginner example in plain everyday words",
+    "Step 2 of a tiny step-by-step beginner example in plain everyday words",
+    "Step 3 of a tiny step-by-step beginner example in plain everyday words"
+  ],
+  "complexitySimple": {
+    "time": "O(...) — simple beginner-friendly explanation of speed",
+    "space": "O(...) — simple beginner-friendly explanation of memory used"
+  },
+  "commonMistake": "1 friendly sentence warning about the #1 beginner mistake and how to avoid it.",
+  "detailedExplanation": "2 encouraging sentences summarizing the core takeaway for the student.",
+  "codeExample": {
+    "language": "C++ or JavaScript or Python",
+    "code": "6 to 10 lines of clean, simple beginner-friendly code",
+    "explanation": "1 sentence plain-English summary of what the code does",
+    "lineByLine": [
+      { "line": "exact code line 1", "explanation": "plain-English explanation for a beginner student" },
+      { "line": "exact code line 2", "explanation": "plain-English explanation for a beginner student" },
+      { "line": "exact code line 3", "explanation": "plain-English explanation for a beginner student" },
+      { "line": "exact code line 4", "explanation": "plain-English explanation for a beginner student" }
+    ]
+  },
+  "quickCheckQuestion": {
+    "question": "1 beginner-friendly multiple-choice question testing the concept",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctIndex": 0,
+    "explanation": "1 encouraging sentence explaining why that option is right"
+  }
+}`;
+}
 

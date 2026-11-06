@@ -73,6 +73,11 @@ import {
   isLearnerProfileCreated,
   generateInitialsAvatarDataUrl,
   sanitizeProfileAvatarUrl,
+  formatPlaylistTabLabel,
+  buildInlineProfessorQuickPrompt,
+  buildConceptMentorQuickPrompts,
+  buildConceptMentorSystemPrompt,
+  normalizeConceptMentorMode,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -236,22 +241,33 @@ describe('Unit Tests: RFC 5545 ICS Calendar Export & Deep Links (TDD)', () => {
   });
 });
 
-describe('Unit Tests: AI Concept Mentor Professor & Interviewer Fallback Engine (TDD)', () => {
-  test('buildSmartConceptFallback returns real-world analogy, line-by-line code, and interview perspective', () => {
+describe('Unit Tests: AI Concept & Technical Mentor Fallback Engine (TDD)', () => {
+  test('buildSmartConceptFallback returns real-world analogy, line-by-line code, and technical deep dive', () => {
     const lesson = PRESET_TRACKERS[0].modules[0].lessons[1]; // Hashing lesson
-    const result = buildSmartConceptFallback(
+    const simpleResult = buildSmartConceptFallback(
       PRESET_TRACKERS[0].title,
       lesson,
       'Why is unordered_map O(1) for Two Sum?',
-      'DSA'
+      'DSA',
+      'simple'
     );
 
-    assert.ok(result.directAnswer.length > 20);
-    assert.ok(result.realWorldAnalogy?.includes('Real-World Example:'));
-    assert.equal(result.codeExample?.language, 'C++');
-    assert.ok((result.codeExample?.lineByLine?.length || 0) >= 4);
-    assert.ok(result.interviewPerspective?.actualInterviewQuestion.includes('Interviewer asks:'));
-    assert.ok(result.interviewPerspective?.whatInterviewerExpects.length);
+    assert.ok(simpleResult.directAnswer.length > 20);
+    assert.ok(simpleResult.realWorldAnalogy?.includes('Real-World Example:'));
+    assert.equal(simpleResult.codeExample?.language, 'C++');
+    assert.ok((simpleResult.codeExample?.lineByLine?.length || 0) >= 4);
+    assert.equal(simpleResult.technicalDeepDive, undefined);
+
+    const technicalResult = buildSmartConceptFallback(
+      PRESET_TRACKERS[0].title,
+      lesson,
+      'Why is unordered_map O(1) for Two Sum?',
+      'DSA',
+      'technical'
+    );
+    assert.ok(technicalResult.technicalDeepDive?.exactDefinition.length);
+    assert.ok(technicalResult.technicalDeepDive?.memoryAndExecutionBehavior.length);
+    assert.ok(technicalResult.technicalDeepDive?.syntaxAndEdgeCases?.length);
   });
 });
 
@@ -1386,7 +1402,7 @@ describe('Unit Tests: Student Onboarding, Personalized Profile & Course-Based Pe
       isBookmarked: true,
       conceptTag: 'Binary Search',
       tags: ['Formula'],
-      nowIso: '2026-11-04T14:00:00.000Z',
+      nowIso: new Date(Date.now() + 60_000).toISOString(),
     });
 
     // User B creates a note in Course 2
@@ -1400,7 +1416,7 @@ describe('Unit Tests: Student Onboarding, Personalized Profile & Course-Based Pe
       isBookmarked: false,
       conceptTag: 'Accessibility',
       tags: ['Important'],
-      nowIso: '2026-11-04T14:05:00.000Z',
+      nowIso: new Date(Date.now() + 120_000).toISOString(),
     });
 
     // RLS check: User Alice only sees her own notes (plus legacy preset notes without a foreign userId)
@@ -1665,10 +1681,113 @@ describe('Unit Tests: Student Onboarding, Personalized Profile & Course-Based Pe
       'https://example.com/my-pic.png'
     );
   });
+
+  test('13. 2-Column Side-by-Side Video Learning Workspace: Playlist Tab Label & Inline Professor Mentor Quick Prompts', () => {
+    assert.equal(formatPlaylistTabLabel(0, 9), 'Playlist (1/9)');
+    assert.equal(formatPlaylistTabLabel(2, 8), 'Playlist (3/8)');
+
+    const explainPrompt = buildInlineProfessorQuickPrompt(
+      'explain',
+      'Lec 3: Hashing & Frequency Counting Maps',
+      ['Direct Address Table', 'Collision Handling']
+    );
+    assert.ok(explainPrompt.includes('Explain "Lec 3: Hashing & Frequency Counting Maps"'));
+    assert.ok(explainPrompt.includes('Direct Address Table'));
+
+    const codePrompt = buildInlineProfessorQuickPrompt(
+      'code',
+      'Lec 3: Hashing & Frequency Counting Maps',
+      ['Direct Address Table']
+    );
+    assert.ok(codePrompt.includes('Give a clean code example'));
+
+    const quizPrompt = buildInlineProfessorQuickPrompt(
+      'quiz',
+      'Lec 3: Hashing & Frequency Counting Maps',
+      ['Direct Address Table']
+    );
+    assert.ok(quizPrompt.includes('Quiz me on'));
+  });
+
+  test('14. 1-on-1 Concept & Technical Mentor: Professor Mode (Beginner) vs Technical Mode (Deep Dive + Code) quick prompts, system instructions, and fallback behavior', () => {
+    assert.equal(normalizeConceptMentorMode('simple'), 'simple');
+    assert.equal(normalizeConceptMentorMode('technical'), 'technical');
+    assert.equal(normalizeConceptMentorMode('interview'), 'technical');
+
+    const lectureTitle = 'Lec 3: Hashing & Frequency Counting Maps';
+    const keyConcepts = ['Direct Address Table', 'unordered_map vs map'];
+
+    // Professor Mode (Beginner) 1-click quick prompts
+    const professorChips = buildConceptMentorQuickPrompts('simple', lectureTitle, keyConcepts);
+    assert.equal(professorChips.length, 4);
+    assert.equal(
+      professorChips[0],
+      `Teach me ${lectureTitle} like I am a beginner with a real-world analogy`
+    );
+    assert.equal(
+      professorChips[1],
+      `Walk me through a tiny step-by-step example for ${lectureTitle}`
+    );
+    assert.equal(
+      professorChips[2],
+      `Show simple beginner code for ${keyConcepts[0]} and explain each line`
+    );
+
+    // Technical Mode (Deep Dive + Code) 1-click quick prompts (exact 4 prompts)
+    const technicalChips = buildConceptMentorQuickPrompts('technical', lectureTitle, keyConcepts);
+    assert.deepEqual(technicalChips, [
+      `Explain the exact technical definition and internal working of ${lectureTitle}`,
+      `Show syntax rules, edge cases, and memory behavior for ${lectureTitle}`,
+      `Provide a clean code implementation with technical comments and complexity analysis`,
+      `What are the common technical pitfalls and best practices in ${lectureTitle}?`,
+    ]);
+
+    // System instructions differentiate Professor Mode vs Technical Mode
+    const profPrompt = buildConceptMentorSystemPrompt({
+      mode: 'simple',
+      topic: 'Python Programming',
+      currentLesson: 'Strings & Immutability',
+      question: 'How do Strings work in Python?',
+    });
+    assert.ok(profPrompt.includes('PROFESSOR MODE (Beginner)'));
+    assert.ok(profPrompt.includes('simple everyday language, zero heavy jargon'));
+
+    const techPrompt = buildConceptMentorSystemPrompt({
+      mode: 'technical',
+      topic: 'Python Programming',
+      currentLesson: 'Strings & Immutability',
+      question: 'How are immutable strings stored in memory?',
+    });
+    assert.ok(techPrompt.includes('TECHNICAL MODE (Deep Dive + Code)'));
+    assert.ok(
+      techPrompt.includes(
+        'strict computer science and software engineering perspective. Provide precise technical definitions, under-the-hood memory and execution behavior, syntax rules, time & space complexity'
+      )
+    );
+
+    // Fallback responses differentiate Professor Mode vs Technical Mode
+    const fallbackSimple = buildSmartConceptFallback(
+      'Python Programming',
+      undefined,
+      'How do Strings work in Python?',
+      'Computer Science Core',
+      'simple'
+    );
+    assert.equal(fallbackSimple.technicalDeepDive, undefined);
+    assert.ok(fallbackSimple.directAnswer.includes('sealed glass display case'));
+
+    const fallbackTechnical = buildSmartConceptFallback(
+      'Python Programming',
+      undefined,
+      'How are immutable strings stored in memory?',
+      'Computer Science Core',
+      'technical'
+    );
+    assert.ok(fallbackTechnical.technicalDeepDive?.exactDefinition);
+    assert.ok(fallbackTechnical.technicalDeepDive?.memoryAndExecutionBehavior);
+    assert.ok(fallbackTechnical.technicalDeepDive?.syntaxAndEdgeCases);
+  });
 });
-
-
-
 
 
 

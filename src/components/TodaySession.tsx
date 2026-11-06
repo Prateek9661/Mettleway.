@@ -7,7 +7,6 @@ import {
   Circle,
   ExternalLink,
   Bell,
-  Sparkles,
   BookOpen,
   Clock,
   Lightbulb,
@@ -22,17 +21,20 @@ import {
   Target,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Youtube,
   Search,
   Square,
   SlidersHorizontal,
   Coffee,
   History,
+  FileText,
+  ListVideo,
 } from 'lucide-react';
 import { Tracker, Lesson, StudyTask, LearnerProfile } from '../types';
 import { soundAlert } from '../utils/audioAlert';
 import {
-  getCurrentUncompletedLesson,
   getActiveOrSelectedLesson,
   calculateCourseProgress,
   generateDailyStudyChecklist,
@@ -53,9 +55,12 @@ import {
   computeFocusSessionAnalytics,
   filterCourseLessons,
   getUserScopedStorageKey,
+  WorkspaceSideTab,
+  formatPlaylistTabLabel,
 } from '../utils/studyWorkspaceLogic';
 import { ConfettiCelebration } from './ConfettiCelebration';
 import { PersonalVideoNotesPanel } from './PersonalVideoNotesPanel';
+import { InlineProfessorMentorTab } from './InlineProfessorMentorTab';
 
 interface TodaySessionProps {
   activeTracker: Tracker | null;
@@ -142,6 +147,13 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
       ),
     [allTrackers, activeTracker]
   );
+
+  // Right-Column 3-Tab Panel State: 'notes' (Default Active Tab) | 'mentor' | 'playlist'
+  const [activeSideTab, setActiveSideTab] = useState<WorkspaceSideTab>('notes');
+
+  // 1-Line Collapsible Recommended Hands-On Exercise State
+  const [isExerciseExpanded, setIsExerciseExpanded] = useState<boolean>(false);
+
   // Timer & Pomodoro Focus System state
   const defaultMinutes = activeTracker?.dailyMinutesTarget || 60;
   const [focusPhase, setFocusPhase] = useState<FocusTimerPhase>('study');
@@ -173,10 +185,9 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   const [secondsRemaining, setSecondsRemaining] = useState<number>(defaultMinutes * 60);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
   const [hasStartedSession, setHasStartedSession] = useState<boolean>(false);
-  const [sessionNotes, setSessionNotes] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // In-course lesson search & filter state
+  // In-course lesson search & filter state (inside Tab 3: Playlist)
   const [courseLessonSearch, setCourseLessonSearch] = useState<string>('');
   const [courseLessonStatusFilter, setCourseLessonStatusFilter] = useState<
     'all' | 'pending' | 'completed'
@@ -223,10 +234,10 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
       setSecondsRemaining(activeTracker.dailyMinutesTarget * 60);
       setIsTimerRunning(false);
       setHasStartedSession(false);
-      setSessionNotes('');
       setTaskFilter('all');
       setCourseLessonSearch('');
       setCourseLessonStatusFilter('all');
+      setIsExerciseExpanded(false);
 
       try {
         const savedTasks = localStorage.getItem(`devtrack_custom_tasks_${activeTracker.id}`);
@@ -265,7 +276,12 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
         setBuiltInChecks({});
       }
     }
-  }, [activeTracker?.id, activeTracker?.sourceUrl, activeTracker?.title, activeTracker?.dailyMinutesTarget]);
+  }, [
+    activeTracker?.id,
+    activeTracker?.sourceUrl,
+    activeTracker?.title,
+    activeTracker?.dailyMinutesTarget,
+  ]);
 
   // Persist custom tasks
   useEffect(() => {
@@ -279,12 +295,14 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   useEffect(() => {
     if (!activeTracker) return;
     try {
-      localStorage.setItem(`devtrack_builtin_checks_${activeTracker.id}`, JSON.stringify(builtInChecks));
+      localStorage.setItem(
+        `devtrack_builtin_checks_${activeTracker.id}`,
+        JSON.stringify(builtInChecks)
+      );
     } catch {}
   }, [builtInChecks, activeTracker]);
 
   const [localSelectedLessonId, setLocalSelectedLessonId] = useState<string | null>(null);
-  const [isPlayerExpanded, setIsPlayerExpanded] = useState<boolean>(true);
   const [seekTimestampSeconds, setSeekTimestampSeconds] = useState<number>(0);
 
   useEffect(() => {
@@ -300,7 +318,6 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   const handleSelectSpecificLesson = (lessonId: string, seekSeconds: number = 0) => {
     setLocalSelectedLessonId(lessonId);
     setSeekTimestampSeconds(seekSeconds);
-    setIsPlayerExpanded(true);
     if (onSelectLesson) {
       onSelectLesson(lessonId);
     }
@@ -369,10 +386,9 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
       phase: focusPhase,
       durationMinutes: elapsedMinutes,
       summaryNote:
-        sessionNotes.trim() ||
-        (focusPhase === 'study'
+        focusPhase === 'study'
           ? `Focused on ${currentLesson?.title || activeTracker.title}`
-          : 'Rest & recovery break completed'),
+          : 'Rest & recovery break completed',
     });
 
     setFocusHistory(updatedHistory);
@@ -386,18 +402,6 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Find previous completed lessons for recap
-  const recentlyCompletedLesson: Lesson | null = React.useMemo(() => {
-    if (!activeTracker) return null;
-    const completedList: Lesson[] = [];
-    for (const mod of activeTracker.modules) {
-      for (const les of mod.lessons) {
-        if (les.completed) completedList.push(les);
-      }
-    }
-    return completedList.length > 0 ? completedList[completedList.length - 1] : null;
-  }, [activeTracker]);
-
   // Overall course progress stats
   const courseProgress = React.useMemo(
     () => calculateCourseProgress(activeTracker),
@@ -406,8 +410,8 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
 
   // Combined Daily Study Checklist (Curriculum-linked tasks + Custom learner tasks)
   const allDailyTasks: StudyTask[] = React.useMemo(
-    () => generateDailyStudyChecklist(currentLesson, builtInChecks, customTasks, sessionNotes),
-    [currentLesson, builtInChecks, customTasks, sessionNotes]
+    () => generateDailyStudyChecklist(currentLesson, builtInChecks, customTasks, ''),
+    [currentLesson, builtInChecks, customTasks]
   );
 
   const filteredTasks = React.useMemo(
@@ -527,7 +531,10 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   const sessionMinutesElapsed = Math.max(0, Math.floor((targetSeconds - secondsRemaining) / 60));
   const totalDailyMinutesStudied = minutesFromCompletedLessonsToday + sessionMinutesElapsed;
   const progressRatio = Math.min(1, totalDailyMinutesStudied / targetMinutes);
-  const progressPercent = Math.min(100, Math.round((totalDailyMinutesStudied / targetMinutes) * 100));
+  const progressPercent = Math.min(
+    100,
+    Math.round((totalDailyMinutesStudied / targetMinutes) * 100)
+  );
 
   // Circular progress SVG math: radius = 88
   const circleRadius = 88;
@@ -559,13 +566,12 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
       Math.round((activeTracker!.dailyMinutesTarget * 60 - secondsRemaining) / 60) ||
       currentLesson.durationMinutes;
     const finalMinutes = Math.max(minutesStudied, 15);
-    onCompleteLesson(currentLesson.id, sessionNotes, finalMinutes);
+    onCompleteLesson(currentLesson.id, '', finalMinutes);
     setCelebrationDetails({
       title: currentLesson.title,
       minutes: finalMinutes,
     });
     setIsCelebrationOpen(true);
-    setSessionNotes('');
     setToastMessage('Lesson marked complete and daily streak extended!');
     setTimeout(() => setToastMessage(null), 4000);
   };
@@ -589,7 +595,9 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
         <div className="w-16 h-16 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-indigo-600">
           <BookOpen className="w-8 h-8" />
         </div>
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">No Active Study Track</h2>
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">
+          No Active Study Track
+        </h2>
         <p className="text-slate-600 max-w-md mx-auto mb-6 text-sm">
           Import any YouTube playlist or course syllabus to generate a structured daily study schedule and task tracker.
         </p>
@@ -603,8 +611,10 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
     );
   }
 
+  const playlistTabLabel = formatPlaylistTabLabel(currentLessonIndex, allCourseLessons.length);
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 space-y-3">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg border border-slate-700 text-xs font-medium flex items-center gap-2">
@@ -613,16 +623,16 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
         </div>
       )}
 
-      {/* Course Overview & Learner Goal Header (Minimalist bar in Deep Work Mode) */}
+      {/* Compact Top Course Overview Strip (Keeps Video Learning Workspace Above the Fold) */}
       {isDeepWork ? (
-        <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-xs">
+        <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
           <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-300">
               <Shield className="w-4 h-4" />
               <span>Deep Work Session</span>
             </span>
             <span aria-hidden="true" className="text-slate-600">·</span>
-            <h1 className="text-base font-bold tracking-tight text-white">
+            <h1 className="text-sm font-bold tracking-tight text-white">
               {activeTracker.title}
             </h1>
             <span aria-hidden="true" className="text-slate-600">·</span>
@@ -641,122 +651,601 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
           )}
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="space-y-2 max-w-2xl">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span className={`font-semibold ${getCourseThemeTokens(activeTracker.category).accentText}`}>
-                  {activeTracker.category}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span>Instructor: {activeTracker.instructor}</span>
-                <span aria-hidden="true">·</span>
-                <span>{activeTracker.difficulty} Level</span>
-                <span aria-hidden="true">·</span>
-                <span className="font-mono tabular-nums">
-                  Daily Target: {activeTracker.dailyMinutesTarget} mins
-                </span>
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+        <div className="bg-white border border-slate-200 rounded-2xl px-4 py-2.5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-2">
+          <div className="space-y-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span className={`font-semibold ${getCourseThemeTokens(activeTracker.category).accentText}`}>
+                {activeTracker.category}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>Instructor: {activeTracker.instructor}</span>
+              <span aria-hidden="true">·</span>
+              <span>{activeTracker.difficulty} Level</span>
+              <span aria-hidden="true">·</span>
+              <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
+                <Briefcase className="w-3 h-3 text-indigo-600" />
+                <span>{effectiveProfile.role}</span>
+              </span>
+              {onOpenProfileModal && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <button
+                    type="button"
+                    onClick={onOpenProfileModal}
+                    className="text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                  >
+                    Customize Role &amp; Pacing
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="flex flex-wrap items-baseline gap-3">
+              <h1 className="text-lg font-bold tracking-tight text-slate-900">
                 DevTrack: {activeTracker.title}
               </h1>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {activeTracker.description ||
-                  'Check off your daily study tasks below, watch your scheduled lesson, and clear any concept doubts with your AI Professor Mentor.'}
-              </p>
-              {/* Universal Learner Role & Career Goal Line */}
-              <div className="pt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                <span className="inline-flex items-center gap-1 font-semibold text-slate-800">
-                  <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>{effectiveProfile.role}</span>
+              {continueLearningInfo && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectSpecificLesson(continueLearningInfo.lessonId, 0)}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                >
+                  <Play className="w-3 h-3 fill-indigo-600" />
+                  <span>Resume Lesson {continueLearningInfo.lessonIndex + 1}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Course Mastery + Quick Header Controls */}
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <div className="w-44 space-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="font-semibold text-slate-600">Course Mastery</span>
+                <span className="font-mono tabular-nums font-bold text-slate-900">
+                  {courseProgress.completed}/{courseProgress.total} ({courseProgress.percent}%)
                 </span>
-                <span aria-hidden="true">·</span>
-                <span className="inline-flex items-center gap-1 text-slate-600">
-                  <Target className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Goal: {effectiveProfile.careerObjective}</span>
-                </span>
-                {onOpenProfileModal && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <button
-                      type="button"
-                      onClick={onOpenProfileModal}
-                      className="text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
-                    >
-                      Customize Role &amp; Pacing
-                    </button>
-                  </>
-                )}
+              </div>
+              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full ${getCourseThemeTokens(activeTracker.category).progressBg} rounded-full transition-all duration-500`}
+                  style={{ width: `${courseProgress.percent}%` }}
+                />
               </div>
             </div>
 
-            {/* Course Completion Bar & Quick Study Actions */}
-            <div className="flex flex-col sm:flex-row lg:flex-col items-stretch sm:items-center lg:items-end justify-between gap-4 shrink-0">
-              <div className="w-full sm:w-64 space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-600">Course Mastery</span>
-                  <span className="font-mono tabular-nums font-bold text-slate-900">
-                    {courseProgress.completed}/{courseProgress.total} lessons ({courseProgress.percent}%)
-                  </span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${getCourseThemeTokens(activeTracker.category).progressBg} rounded-full transition-all duration-500`}
-                    style={{ width: `${courseProgress.percent}%` }}
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {activeTracker.sourceUrl && /^https?:\/\//i.test(activeTracker.sourceUrl) && (
-                  <a
-                    href={activeTracker.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
-                    title="Open the course's main YouTube playlist or video URL"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Course Playlist</span>
-                  </a>
-                )}
-                <button
-                  type="button"
-                  onClick={onSwitchToCurriculum}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            <div className="flex flex-wrap items-center gap-1.5">
+              {activeTracker.sourceUrl && /^https?:\/\//i.test(activeTracker.sourceUrl) && (
+                <a
+                  href={activeTracker.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                  title="Open the course's main YouTube playlist or video URL"
                 >
-                  <Map className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Full Syllabus</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleTestAlert}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
-                  title="Test the Web Audio session alert chime"
-                >
-                  <Bell className="w-3.5 h-3.5" />
-                  <span>Test Chime</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleTriggerCelebrationTest}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors cursor-pointer"
-                  title="Preview milestone celebration & confetti burst"
-                >
-                  <PartyPopper className="w-3.5 h-3.5" />
-                  <span>Preview Milestone</span>
-                </button>
-              </div>
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Course Playlist</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={onSwitchToCurriculum}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Map className="w-3 h-3 text-slate-500" />
+                <span>Full Syllabus</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTestAlert}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                title="Test the Web Audio session alert chime"
+              >
+                <Bell className="w-3 h-3" />
+                <span>Test Chime</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleTriggerCelebrationTest}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                title="Preview milestone celebration & confetti burst"
+              >
+                <PartyPopper className="w-3 h-3" />
+                <span>Preview Milestone</span>
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Main Learner Workspace Grid: Left (Daily Task Tracker + Lesson) | Right (Focus Timer + Recap) */}
+      {/* ==========================================================================
+          ABOVE-THE-FOLD 2-COLUMN SIDE-BY-SIDE VIDEO LEARNING WORKSPACE
+          Left Column (60% width on desktop): Video Player + Compact Action Bar + 1-Line Collapsible Exercise
+          Right Column (40% width on desktop): 3-Tab Panel ("Live Notes", "Ask Professor Mentor", "Playlist (X/Y)")
+         ========================================================================== */}
+      {currentLesson ? (
+        <div
+          id="active-lesson-player-card"
+          data-testid="video-learning-workspace"
+          className="bg-white border border-slate-200 rounded-2xl p-3.5 sm:p-4 shadow-xs space-y-2.5"
+        >
+          {/* Top Compact Bar: Active Lecture Title + Prev/Next Navigation */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-bold text-indigo-600">
+                  Active Lecture ({currentLessonIndex + 1} of {allCourseLessons.length})
+                </span>
+                {currentModuleTitle && (
+                  <>
+                    <span aria-hidden="true" className="text-slate-300">·</span>
+                    <span className="text-slate-500 font-medium truncate max-w-xs">
+                      {currentModuleTitle}
+                    </span>
+                  </>
+                )}
+                <span aria-hidden="true" className="text-slate-300">·</span>
+                <span className="text-slate-500 font-mono tabular-nums inline-flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  <span>{currentLesson.durationMinutes}m</span>
+                </span>
+              </div>
+              <div className="flex flex-wrap items-baseline gap-2 mt-0.5">
+                <h2 className="text-base sm:text-lg font-bold text-slate-900 truncate">
+                  {currentLesson.title}
+                </h2>
+                {currentLesson.keyConcepts.length > 0 && (
+                  <div className="hidden md:flex items-center gap-1.5 text-xs text-slate-500">
+                    <span aria-hidden="true">·</span>
+                    {currentLesson.keyConcepts.map((concept, i) => (
+                      <React.Fragment key={i}>
+                        <span className="text-slate-700 font-medium">{concept}</span>
+                        {i < currentLesson.keyConcepts.length - 1 && (
+                          <span aria-hidden="true">·</span>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Sequential Prev / Next Lecture Switcher */}
+            {allCourseLessons.length > 1 && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  disabled={currentLessonIndex <= 0}
+                  onClick={() => {
+                    const prevLesson = allCourseLessons[currentLessonIndex - 1];
+                    if (prevLesson) handleSelectSpecificLesson(prevLesson.id, 0);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                  title="Previous Lesson in Playlist"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Previous Lesson</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={currentLessonIndex >= allCourseLessons.length - 1}
+                  onClick={() => {
+                    const nextLesson = allCourseLessons[currentLessonIndex + 1];
+                    if (nextLesson) handleSelectSpecificLesson(nextLesson.id, 0);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                  title="Next Lesson in Playlist"
+                >
+                  <span>Next Lesson</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 2-Column Side-by-Side Split: 60% Left Column (`3fr`) | 40% Right Column (`2fr`) */}
+          <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-5 items-stretch">
+            {/* LEFT COLUMN (60% width on desktop): Video Player + Compact Action Bar + 1-Line Collapsible Exercise */}
+            <div
+              data-testid="workspace-left-column"
+              className="flex flex-col justify-between space-y-3 min-w-0"
+            >
+              {/* Embedded YouTube Video Player at the Top */}
+              {(() => {
+                const embedUrl = resolveLessonEmbedUrl(
+                  activeTracker.sourceUrl,
+                  currentLesson.videoUrl,
+                  currentLessonIndex,
+                  seekTimestampSeconds
+                );
+                if (!embedUrl) return null;
+
+                return (
+                  <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-xs">
+                    <iframe
+                      key={`${activeTracker.id}-${currentLesson.id}-${currentLessonIndex}-${seekTimestampSeconds}`}
+                      src={embedUrl}
+                      title={`YouTube video player for ${currentLesson.title}`}
+                      className="w-full h-full border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                    />
+                  </div>
+                );
+              })()}
+
+              {/* Compact Action Bar Directly Below the Video Player */}
+              <div
+                data-testid="video-compact-action-bar"
+                className="space-y-2"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50/90 border border-slate-200 rounded-xl px-3.5 py-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Primary Green Button: "Complete Lesson & Log Streak" */}
+                    <button
+                      type="button"
+                      data-testid="complete-lesson-log-streak-btn"
+                      onClick={handleMarkComplete}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-xs cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Complete Lesson &amp; Log Streak</span>
+                    </button>
+
+                    {/* Toggle Completed Status */}
+                    <button
+                      type="button"
+                      onClick={() => onToggleLesson(currentLesson.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        currentLesson.completed
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      <CheckCircle2
+                        className={`w-3.5 h-3.5 ${
+                          currentLesson.completed ? 'text-emerald-600' : 'text-slate-400'
+                        }`}
+                      />
+                      <span>
+                        {currentLesson.completed ? 'Completed (Undo)' : 'Mark Completed'}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* "Watch on YouTube" Link */}
+                  <a
+                    href={
+                      activeTracker.id === 'tracker-dsa-striver' ||
+                      activeTracker.id === 'tracker-fullstack-mern'
+                        ? currentLesson.videoUrl
+                        : resolveLessonVideoUrl(
+                            activeTracker.sourceUrl,
+                            currentLesson.videoUrl,
+                            currentLessonIndex,
+                            activeTracker.title,
+                            currentLesson.title
+                          )
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="watch-on-youtube-link"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <Youtube className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Watch on YouTube</span>
+                    <ExternalLink className="w-3 h-3 text-slate-400" />
+                  </a>
+                </div>
+
+                {/* Concise 1-Line Collapsible Banner for "Recommended Hands-On Exercise" */}
+                {currentLesson.practiceTask && (
+                  <div
+                    data-testid="collapsible-exercise-banner"
+                    className="bg-amber-50/70 border border-amber-200/80 rounded-xl px-3.5 py-2 text-xs transition-colors"
+                  >
+                    <button
+                      type="button"
+                      data-testid="toggle-exercise-banner-btn"
+                      onClick={() => setIsExerciseExpanded(prev => !prev)}
+                      aria-expanded={isExerciseExpanded}
+                      className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <Lightbulb className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span className="font-bold text-slate-800 whitespace-nowrap shrink-0">
+                          Recommended Hands-On Exercise:
+                        </span>
+                        <span
+                          className={`text-slate-700 ${
+                            isExerciseExpanded ? '' : 'truncate'
+                          }`}
+                        >
+                          {currentLesson.practiceTask}
+                        </span>
+                      </div>
+                      <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-amber-800 whitespace-nowrap shrink-0">
+                        <span>{isExerciseExpanded ? 'Hide' : 'Expand'}</span>
+                        {isExerciseExpanded ? (
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        )}
+                      </span>
+                    </button>
+
+                    {isExerciseExpanded && (
+                      <div className="mt-2 pt-2 border-t border-amber-200/70 text-slate-700 leading-relaxed flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs">{currentLesson.practiceTask}</p>
+                        <button
+                          type="button"
+                          onClick={() => setActiveSideTab('mentor')}
+                          className="text-[11px] font-semibold text-indigo-700 hover:underline cursor-pointer shrink-0"
+                        >
+                          Ask Professor Mentor for a hint &rarr;
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* RIGHT COLUMN (40% width on desktop, matching height of left column):
+                Sleek 3-Tab Panel:
+                - Tab 1: "Live Notes" (Default Active Tab)
+                - Tab 2: "Ask Professor Mentor" (Live AI Doubt Solver)
+                - Tab 3: "Playlist (X/Y)" */}
+            <div
+              data-testid="workspace-right-column"
+              className="flex flex-col border border-slate-200 rounded-2xl bg-white p-3 shadow-2xs min-w-0 lg:max-h-[540px]"
+            >
+              {/* 3-Tab Segmented Switcher Bar */}
+              <div
+                role="tablist"
+                aria-label="Video Learning Workspace Tools"
+                className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl mb-2.5 shrink-0"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSideTab === 'notes'}
+                  data-testid="workspace-tab-notes"
+                  onClick={() => setActiveSideTab('notes')}
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                    activeSideTab === 'notes'
+                      ? 'bg-white text-indigo-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5 shrink-0" />
+                  <span>Live Notes</span>
+                </button>
+
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSideTab === 'mentor'}
+                  data-testid="workspace-tab-mentor"
+                  onClick={() => setActiveSideTab('mentor')}
+                  className={`flex-[1.35] flex items-center justify-center gap-1 py-1.5 px-2 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                    activeSideTab === 'mentor'
+                      ? 'bg-white text-indigo-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <GraduationCap className="w-3.5 h-3.5 shrink-0" />
+                  <span>Ask Professor Mentor</span>
+                </button>
+
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeSideTab === 'playlist'}
+                  data-testid="workspace-tab-playlist"
+                  onClick={() => setActiveSideTab('playlist')}
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                    activeSideTab === 'playlist'
+                      ? 'bg-white text-indigo-700 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <ListVideo className="w-3.5 h-3.5 shrink-0" />
+                  <span className="font-mono tabular-nums">{playlistTabLabel}</span>
+                </button>
+              </div>
+
+              {/* TAB 1 CONTENT: "Live Notes" (Unified Note-Taking System) */}
+              {activeSideTab === 'notes' && (
+                <div className="flex-1 min-h-0 overflow-y-auto pr-0.5">
+                  {onAddVideoNote &&
+                  onUpdateVideoNote &&
+                  onDeleteVideoNote &&
+                  onToggleBookmarkVideoNote ? (
+                    <PersonalVideoNotesPanel
+                      tracker={activeTracker}
+                      currentLesson={currentLesson}
+                      currentLessonIndex={currentLessonIndex}
+                      elapsedSessionSeconds={Math.max(0, targetSeconds - secondsRemaining)}
+                      userId={effectiveProfile.userId}
+                      onAddNote={onAddVideoNote}
+                      onUpdateNote={onUpdateVideoNote}
+                      onDeleteNote={onDeleteVideoNote}
+                      onToggleBookmarkNote={onToggleBookmarkVideoNote}
+                      onOpenNotesLibrary={onOpenNotesLibrary}
+                      onSeekToTimestamp={(secs, lessonId) => {
+                        handleSelectSpecificLesson(lessonId, secs);
+                        setToastMessage(`Jumped video player to timestamp ${formatTime(secs)}.`);
+                        setTimeout(() => setToastMessage(null), 2500);
+                      }}
+                    />
+                  ) : null}
+                </div>
+              )}
+
+              {/* TAB 2 CONTENT: "Ask Professor Mentor" (Inline AI Assistant) */}
+              {activeSideTab === 'mentor' && (
+                <div className="flex-1 min-h-0 overflow-y-auto pr-0.5">
+                  <InlineProfessorMentorTab
+                    tracker={activeTracker}
+                    currentLesson={currentLesson}
+                    currentLessonIndex={currentLessonIndex}
+                    onOpenFullMentorView={onSwitchToMentor}
+                  />
+                </div>
+              )}
+
+              {/* TAB 3 CONTENT: "Playlist" (Searchable Course Playlist Lessons List) */}
+              {activeSideTab === 'playlist' && (
+                <div
+                  data-testid="workspace-playlist-panel"
+                  className="flex flex-col flex-1 min-h-0 space-y-2.5"
+                >
+                  <div className="space-y-2 shrink-0">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-900">
+                        Course Playlist ({courseProgress.completed}/{courseProgress.total} completed)
+                      </span>
+                      <span className="font-mono tabular-nums text-indigo-600 font-semibold">
+                        {courseProgress.percent}% done
+                      </span>
+                    </div>
+
+                    {/* Search + Status Filter Row */}
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                        <input
+                          type="text"
+                          data-testid="course-lesson-search-input"
+                          value={courseLessonSearch}
+                          onChange={e => setCourseLessonSearch(e.target.value)}
+                          placeholder="Search lessons or concepts..."
+                          aria-label="Search lessons within this course"
+                          className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
+                        />
+                      </div>
+
+                      <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-[11px] font-semibold shrink-0">
+                        {(['all', 'pending', 'completed'] as const).map(st => (
+                          <button
+                            key={st}
+                            type="button"
+                            onClick={() => setCourseLessonStatusFilter(st)}
+                            className={`px-2 py-1 rounded-md capitalize transition-colors cursor-pointer ${
+                              courseLessonStatusFilter === st
+                                ? 'bg-white text-slate-900 shadow-2xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            {st === 'all' ? 'All' : st === 'pending' ? 'Pending' : 'Done'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Scrollable Course Playlist Lessons List */}
+                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-slate-50/50 overflow-y-auto flex-1 max-h-[390px]">
+                    {filteredCourseLessons.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-slate-500">
+                        No lessons match &ldquo;{courseLessonSearch}&rdquo;.
+                      </div>
+                    ) : (
+                      filteredCourseLessons.map(({ lesson: item, originalIndex: idx }) => {
+                        const isPlaying = item.id === currentLesson.id;
+                        return (
+                          <div
+                            key={item.id}
+                            className={`px-3 py-2.5 flex items-start gap-2.5 text-xs transition-colors ${
+                              isPlaying
+                                ? 'bg-indigo-50/90 text-indigo-950'
+                                : 'hover:bg-white text-slate-700'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => onToggleLesson(item.id)}
+                              className="mt-0.5 text-slate-400 hover:text-indigo-600 cursor-pointer shrink-0"
+                              title={
+                                item.completed
+                                  ? 'Mark lesson pending'
+                                  : 'Mark lesson completed'
+                              }
+                              aria-label={
+                                item.completed
+                                  ? `Mark ${item.title} pending`
+                                  : `Mark ${item.title} completed`
+                              }
+                            >
+                              {item.completed ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                              ) : (
+                                <Circle className="w-4 h-4" />
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleSelectSpecificLesson(item.id, 0)}
+                              className="flex-1 text-left min-w-0 cursor-pointer space-y-0.5"
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span
+                                  className={`font-mono tabular-nums text-[11px] ${
+                                    isPlaying
+                                      ? 'font-bold text-indigo-600'
+                                      : 'text-slate-400'
+                                  }`}
+                                >
+                                  {isPlaying ? `▶ Playing #${idx + 1}` : `Lecture #${idx + 1}`}
+                                </span>
+                                <span className="font-mono tabular-nums text-[11px] text-slate-400">
+                                  {item.durationMinutes}m
+                                </span>
+                              </div>
+                              <p
+                                className={`line-clamp-2 leading-snug ${
+                                  item.completed
+                                    ? 'line-through text-slate-400'
+                                    : isPlaying
+                                    ? 'font-bold text-indigo-950'
+                                    : 'font-medium text-slate-800'
+                                }`}
+                              >
+                                {item.title}
+                              </p>
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-8 text-center space-y-3">
+          <CheckCircle2 className="w-12 h-12 text-emerald-600 mx-auto" />
+          <h3 className="text-lg font-bold text-emerald-900">
+            All Curriculum Lessons Completed!
+          </h3>
+          <p className="text-xs text-emerald-800 max-w-md mx-auto">
+            You have finished every scheduled lesson in this track. Practice interview questions with the Concept Mentor or import your next course!
+          </p>
+        </div>
+      )}
+
+      {/* ==========================================================================
+          SECONDARY WORKSPACE ROW:
+          Left (Daily Study Task Checklist) | Right (Focus & Pomodoro Timer + Career Milestones)
+          Note: Redundant "Quick Lesson Notes", bottom "Course Playlist Lectures", and
+          standalone "Last Completed Lesson" card have been completely removed.
+         ========================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Primary Column: Daily Task Checklist + Today's Assigned Lesson */}
-        <div className="lg:col-span-8 space-y-6">
-          {/* 1. Interactive Daily Study Task Checklist */}
+        {/* Left Column (7 cols): Interactive Daily Study Task Checklist */}
+        <div className="lg:col-span-7 space-y-6">
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div>
@@ -804,7 +1293,8 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 </div>
               ) : (
                 filteredTasks.map(task => {
-                  const isCustom = task.id.startsWith('custom-') || task.id.startsWith('default-task-');
+                  const isCustom =
+                    task.id.startsWith('custom-') || task.id.startsWith('default-task-');
                   return (
                     <div
                       key={task.id}
@@ -837,7 +1327,9 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                             {task.linkedLessonId && (
                               <>
                                 <span aria-hidden="true">·</span>
-                                <span className="text-indigo-600 font-medium">Synced with Roadmap</span>
+                                <span className="text-indigo-600 font-medium">
+                                  Synced with Roadmap
+                                </span>
                               </>
                             )}
                           </div>
@@ -908,502 +1400,10 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
               </div>
             </form>
           </div>
-
-          {/* Continue Learning Smart Progress Strip */}
-          {!isDeepWork && continueLearningInfo && (
-            <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
-              <div className="space-y-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-indigo-300">
-                  <span className="font-semibold">Continue Learning</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-mono tabular-nums">
-                    {continueLearningInfo.completedLessons} completed ·{' '}
-                    {continueLearningInfo.pendingLessons} pending (
-                    {continueLearningInfo.progressPercent}%)
-                  </span>
-                </div>
-                <p className="text-sm font-bold text-white truncate">
-                  Lecture {continueLearningInfo.lessonIndex + 1}: {continueLearningInfo.lessonTitle}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  handleSelectSpecificLesson(continueLearningInfo.lessonId, 0);
-                  const el = document.getElementById('active-lesson-player-card');
-                  if (el && el.scrollIntoView) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }
-                }}
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-slate-900 bg-white hover:bg-indigo-50 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <Play className="w-3.5 h-3.5 fill-slate-900" />
-                <span>Resume Lesson {continueLearningInfo.lessonIndex + 1}</span>
-              </button>
-            </div>
-          )}
-
-          {/* 2. Today's Assigned Lesson, Interactive Course Video Player, Playlist Sidebar & Personal Notes */}
-          {currentLesson ? (
-            <div
-              id="active-lesson-player-card"
-              className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-semibold uppercase tracking-wider text-indigo-600">
-                    Active Lecture ({currentLessonIndex + 1} of {allCourseLessons.length})
-                  </span>
-                  {currentModuleTitle && (
-                    <>
-                      <span aria-hidden="true" className="text-slate-300">·</span>
-                      <span className="text-slate-500 font-medium truncate max-w-xs">
-                        {currentModuleTitle}
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {/* Sequential Prev / Next Lecture Switcher */}
-                  {allCourseLessons.length > 1 && (
-                    <div className="flex items-center gap-1 mr-1">
-                      <button
-                        type="button"
-                        disabled={currentLessonIndex <= 0}
-                        onClick={() => {
-                          const prevLesson = allCourseLessons[currentLessonIndex - 1];
-                          if (prevLesson) handleSelectSpecificLesson(prevLesson.id, 0);
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
-                        title="Previous Lesson in Playlist"
-                      >
-                        <ChevronLeft className="w-3.5 h-3.5" />
-                        <span>Previous Lesson</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={currentLessonIndex >= allCourseLessons.length - 1}
-                        onClick={() => {
-                          const nextLesson = allCourseLessons[currentLessonIndex + 1];
-                          if (nextLesson) handleSelectSpecificLesson(nextLesson.id, 0);
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
-                        title="Next Lesson in Playlist"
-                      >
-                        <span>Next Lesson</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-
-                  <span className="text-xs text-slate-500 font-mono tabular-nums flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5" />
-                    {currentLesson.durationMinutes} mins lecture
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 leading-snug">
-                  {currentLesson.title}
-                </h2>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-2">
-                  <span>Core Concepts:</span>
-                  {currentLesson.keyConcepts.map((concept, i) => (
-                    <React.Fragment key={i}>
-                      <span className="text-slate-800 font-medium">{concept}</span>
-                      {i < currentLesson.keyConcepts.length - 1 && <span aria-hidden="true">·</span>}
-                    </React.Fragment>
-                  ))}
-                </div>
-              </div>
-
-              {/* Interactive Embedded YouTube Player + Complete Playlist Sidebar */}
-              {(() => {
-                const embedUrl = resolveLessonEmbedUrl(
-                  activeTracker.sourceUrl,
-                  currentLesson.videoUrl,
-                  currentLessonIndex,
-                  seekTimestampSeconds
-                );
-                if (!embedUrl) return null;
-
-                return (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-slate-700 flex items-center gap-1.5">
-                        <Youtube className="w-4 h-4 text-rose-600" />
-                        <span>
-                          Now Playing: Lecture {currentLessonIndex + 1} — {currentLesson.title}
-                          {seekTimestampSeconds > 0 ? ` (Seeked to ${formatTime(seekTimestampSeconds)})` : ''}
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setIsPlayerExpanded(prev => !prev)}
-                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
-                      >
-                        {isPlayerExpanded ? 'Hide Video Player' : 'Show Video Player'}
-                      </button>
-                    </div>
-
-                    {isPlayerExpanded && (
-                      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
-                        {/* Responsive 16:9 Embedded Video Player (8 cols on XL) */}
-                        <div className="xl:col-span-8 relative w-full aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-xs">
-                          <iframe
-                            key={`${activeTracker.id}-${currentLesson.id}-${currentLessonIndex}-${seekTimestampSeconds}`}
-                            src={embedUrl}
-                            title={`YouTube video player for ${currentLesson.title}`}
-                            className="w-full h-full border-0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            allowFullScreen
-                          />
-                        </div>
-
-                        {/* Complete Playlist Sidebar with In-Course Search & Status Filter (4 cols on XL) */}
-                        <div className="xl:col-span-4 border border-slate-200 rounded-xl bg-slate-50/70 flex flex-col max-h-[380px] overflow-hidden">
-                          <div className="px-3.5 py-2.5 bg-white border-b border-slate-200 space-y-2">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-bold text-slate-900">
-                                Course Playlist ({courseProgress.completed}/{courseProgress.total})
-                              </span>
-                              <span className="font-mono tabular-nums text-indigo-600 font-semibold">
-                                {courseProgress.percent}% done
-                              </span>
-                            </div>
-
-                            {/* In-Course Lesson Search Input */}
-                            <div className="relative">
-                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
-                              <input
-                                type="text"
-                                data-testid="course-lesson-search-input"
-                                value={courseLessonSearch}
-                                onChange={e => setCourseLessonSearch(e.target.value)}
-                                placeholder="Search lessons or concepts..."
-                                aria-label="Search lessons within this course"
-                                className="w-full pl-8 pr-2.5 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none text-slate-900"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="divide-y divide-slate-100 overflow-y-auto flex-1">
-                            {filteredCourseLessons.length === 0 ? (
-                              <div className="p-4 text-center text-xs text-slate-500">
-                                No lessons match &ldquo;{courseLessonSearch}&rdquo;.
-                              </div>
-                            ) : (
-                              filteredCourseLessons.map(({ lesson: item, originalIndex: idx }) => {
-                                const isPlaying = item.id === currentLesson.id;
-                                return (
-                                  <div
-                                    key={item.id}
-                                    className={`px-3 py-2.5 flex items-start gap-2.5 text-xs transition-colors ${
-                                      isPlaying
-                                        ? 'bg-indigo-50/90 text-indigo-950'
-                                        : 'hover:bg-white text-slate-700'
-                                    }`}
-                                  >
-                                    <button
-                                      type="button"
-                                      onClick={() => onToggleLesson(item.id)}
-                                      className="mt-0.5 text-slate-400 hover:text-indigo-600 cursor-pointer shrink-0"
-                                      title={
-                                        item.completed
-                                          ? 'Mark lesson pending'
-                                          : 'Mark lesson completed'
-                                      }
-                                      aria-label={
-                                        item.completed
-                                          ? `Mark ${item.title} pending`
-                                          : `Mark ${item.title} completed`
-                                      }
-                                    >
-                                      {item.completed ? (
-                                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                      ) : (
-                                        <Circle className="w-4 h-4" />
-                                      )}
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSelectSpecificLesson(item.id, 0)}
-                                      className="flex-1 text-left min-w-0 cursor-pointer space-y-0.5"
-                                    >
-                                      <div className="flex items-center justify-between gap-1">
-                                        <span
-                                          className={`font-mono tabular-nums text-[11px] ${
-                                            isPlaying
-                                              ? 'font-bold text-indigo-600'
-                                              : 'text-slate-400'
-                                          }`}
-                                        >
-                                          {isPlaying ? `▶ Playing #${idx + 1}` : `Lecture #${idx + 1}`}
-                                        </span>
-                                        <span className="font-mono tabular-nums text-[11px] text-slate-400">
-                                          {item.durationMinutes}m
-                                        </span>
-                                      </div>
-                                      <p
-                                        className={`line-clamp-2 leading-snug ${
-                                          item.completed
-                                            ? 'line-through text-slate-400'
-                                            : isPlaying
-                                            ? 'font-bold text-indigo-950'
-                                            : 'font-medium text-slate-800'
-                                        }`}
-                                      >
-                                        {item.title}
-                                      </p>
-                                    </button>
-                                  </div>
-                                );
-                              })
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Practice Task Callout */}
-              {currentLesson.practiceTask && (
-                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
-                  <div className="font-semibold text-slate-800 flex items-center gap-1.5">
-                    <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Recommended Hands-On Exercise:</span>
-                  </div>
-                  <p className="text-slate-600 leading-relaxed pl-5">
-                    {currentLesson.practiceTask}
-                  </p>
-                </div>
-              )}
-
-              {/* Action Buttons: Watch Video + Ask Professor Mentor + Toggle Lesson Status + Complete Lesson */}
-              <div className="flex flex-wrap items-center gap-3 pt-1">
-                <a
-                  href={
-                    activeTracker.id === 'tracker-dsa-striver' || activeTracker.id === 'tracker-fullstack-mern'
-                      ? currentLesson.videoUrl
-                      : resolveLessonVideoUrl(
-                          activeTracker.sourceUrl,
-                          currentLesson.videoUrl,
-                          currentLessonIndex,
-                          activeTracker.title,
-                          currentLesson.title
-                        )
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Watch Lecture {currentLessonIndex + 1} on YouTube</span>
-                </a>
-
-                <button
-                  type="button"
-                  onClick={onSwitchToMentor}
-                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors cursor-pointer"
-                >
-                  <GraduationCap className="w-3.5 h-3.5" />
-                  <span>Ask Professor Mentor</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onToggleLesson(currentLesson.id)}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer ${
-                    currentLesson.completed
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <CheckCircle2
-                    className={`w-3.5 h-3.5 ${
-                      currentLesson.completed ? 'text-emerald-600' : 'text-slate-400'
-                    }`}
-                  />
-                  <span>
-                    {currentLesson.completed ? 'Completed (Click to Undo)' : 'Mark Completed'}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleMarkComplete}
-                  className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-xs cursor-pointer sm:ml-auto"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Complete Lesson &amp; Log Streak</span>
-                </button>
-              </div>
-
-              {/* Quick Session Takeaways (Saved on Completion) */}
-              <div className="pt-3 border-t border-slate-100">
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Quick Lesson Notes &amp; Key Formulas (Saved on completion):
-                </label>
-                <textarea
-                  value={sessionNotes}
-                  onChange={e => setSessionNotes(e.target.value)}
-                  placeholder="Jot down what clicked today, dry-run examples, or edge cases to remember..."
-                  rows={2}
-                  className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none bg-slate-50/60 text-slate-900"
-                />
-              </div>
-
-              {/* Personal Timestamped Video Notes & Concept Bookmarks Studio */}
-              {onAddVideoNote &&
-                onUpdateVideoNote &&
-                onDeleteVideoNote &&
-                onToggleBookmarkVideoNote && (
-                  <PersonalVideoNotesPanel
-                    tracker={activeTracker}
-                    currentLesson={currentLesson}
-                    currentLessonIndex={currentLessonIndex}
-                    elapsedSessionSeconds={Math.max(0, targetSeconds - secondsRemaining)}
-                    userId={effectiveProfile.userId}
-                    onAddNote={onAddVideoNote}
-                    onUpdateNote={onUpdateVideoNote}
-                    onDeleteNote={onDeleteVideoNote}
-                    onToggleBookmarkNote={onToggleBookmarkVideoNote}
-                    onOpenNotesLibrary={onOpenNotesLibrary}
-                    onSeekToTimestamp={(secs, lessonId) => {
-                      handleSelectSpecificLesson(lessonId, secs);
-                      setToastMessage(`Jumped video player to timestamp ${formatTime(secs)}.`);
-                      setTimeout(() => setToastMessage(null), 2500);
-                    }}
-                  />
-                )}
-            </div>
-          ) : (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-8 text-center space-y-3">
-              <CheckCircle2 className="w-12 h-12 text-emerald-600 mx-auto" />
-              <h3 className="text-lg font-bold text-emerald-900">All Curriculum Lessons Completed!</h3>
-              <p className="text-xs text-emerald-800 max-w-md mx-auto">
-                You have finished every scheduled lesson in this track. Practice interview questions with the Concept Mentor or import your next course!
-              </p>
-            </div>
-          )}
-
-          {/* 3. Sequential Playlist Lectures & Direct Video Navigation */}
-          {!isDeepWork && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Course Playlist Lectures ({activeTracker.title})
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Click any lesson below to immediately load and play that specific lecture in the player above or open it on YouTube.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={onSwitchToCurriculum}
-                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer self-start sm:self-auto"
-                >
-                  Open Full Syllabus View &rarr;
-                </button>
-              </div>
-
-              <div className="divide-y divide-slate-100">
-                {allCourseLessons.map((lesson, idx) => {
-                  const directHref =
-                    activeTracker.id === 'tracker-dsa-striver' ||
-                    activeTracker.id === 'tracker-fullstack-mern'
-                      ? lesson.videoUrl
-                      : resolveLessonVideoUrl(
-                          activeTracker.sourceUrl,
-                          lesson.videoUrl,
-                          idx,
-                          activeTracker.title,
-                          lesson.title
-                        );
-                  const isCurrent = currentLesson?.id === lesson.id;
-
-                  return (
-                    <div
-                      key={lesson.id}
-                      className={`py-2.5 flex items-center justify-between gap-3 text-xs transition-colors ${
-                        isCurrent
-                          ? 'bg-indigo-50/70 -mx-2 px-2 rounded-lg'
-                          : 'hover:bg-slate-50 -mx-2 px-2 rounded-lg'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <button
-                          type="button"
-                          onClick={() => onToggleLesson(lesson.id)}
-                          className="text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer shrink-0"
-                          title={lesson.completed ? 'Mark uncompleted' : 'Mark completed'}
-                        >
-                          {lesson.completed ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                          ) : (
-                            <Circle className="w-4 h-4" />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectSpecificLesson(lesson.id)}
-                          className={`truncate font-medium text-left cursor-pointer hover:text-indigo-600 transition-colors ${
-                            lesson.completed
-                              ? 'line-through text-slate-400'
-                              : isCurrent
-                              ? 'font-bold text-indigo-950'
-                              : 'text-slate-800'
-                          }`}
-                          title={`Click to load ${lesson.title} in the course player`}
-                        >
-                          {lesson.title}
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-slate-400 font-mono tabular-nums hidden sm:inline">
-                          {lesson.durationMinutes}m
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectSpecificLesson(lesson.id)}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
-                            isCurrent
-                              ? 'bg-indigo-600 text-white'
-                              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700'
-                          }`}
-                        >
-                          <Play className="w-3 h-3 fill-current" />
-                          <span>{isCurrent ? `Playing Lec ${idx + 1}` : `Play Lec ${idx + 1}`}</span>
-                        </button>
-                        <a
-                          href={directHref}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold transition-colors cursor-pointer"
-                          title={`Open Lecture ${idx + 1} on YouTube`}
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          <span className="hidden md:inline">YouTube</span>
-                        </a>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Right Utility Column (4 cols): Focus Timer & Previous Concept Recap */}
-        <div className="lg:col-span-4 space-y-6">
+        {/* Right Column (5 cols): Focus & Pomodoro Timer + Career Milestones */}
+        <div className="lg:col-span-5 space-y-6">
           {/* Focus & Pomodoro Concentration System Card */}
           <div
             data-testid="focus-pomodoro-card"
@@ -1561,7 +1561,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
             {/* Visual Circular Progress Ring */}
             <div className="relative my-1 flex items-center justify-center">
               <svg
-                className="w-44 h-44 transform -rotate-90"
+                className="w-40 h-40 transform -rotate-90"
                 viewBox="0 0 210 210"
                 aria-label={`Daily progress: ${progressPercent}%`}
               >
@@ -1594,7 +1594,7 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
               </svg>
 
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-3xl font-extrabold tracking-tight font-mono tabular-nums text-slate-900">
+                <span className="text-2xl font-extrabold tracking-tight font-mono tabular-nums text-slate-900">
                   {formatTime(secondsRemaining)}
                 </span>
                 <span className="text-[11px] font-medium text-slate-500 mt-1 font-mono tabular-nums">
@@ -1836,31 +1836,6 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Previous Lesson Revision Card (Hidden in Deep Work mode) */}
-          {!isDeepWork && recentlyCompletedLesson && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-2.5">
-              <div className="flex items-center gap-2 text-xs font-semibold text-indigo-600">
-                <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                <span>Last Completed Lesson</span>
-              </div>
-              <h3 className="text-sm font-bold text-slate-900 leading-snug">
-                {recentlyCompletedLesson.title}
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {recentlyCompletedLesson.notes ||
-                  'Completed and logged in your roadmap. Use the Concept Mentor to review real-world analogies or test yourself before moving ahead.'}
-              </p>
-              <button
-                type="button"
-                onClick={onSwitchToMentor}
-                className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-1 pt-1 cursor-pointer"
-              >
-                <span>Revise with Professor Mentor</span>
-                <span aria-hidden="true">&rarr;</span>
-              </button>
             </div>
           )}
         </div>

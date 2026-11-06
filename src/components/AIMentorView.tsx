@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Sparkles,
   Brain,
   CheckCircle,
-  HelpCircle,
   Code2,
   AlertTriangle,
   Lightbulb,
@@ -21,12 +19,16 @@ import {
   ShieldAlert,
   BookOpen,
   GraduationCap,
-  Briefcase,
-  Terminal
+  Cpu,
+  Terminal,
 } from 'lucide-react';
 import { Tracker, Lesson, AIRecapData, ConceptTutorAnswer } from '../types';
 import { aiMentorStorage, buildSmartConceptFallback } from '../utils/aiMentorCache';
-import { buildDefaultRecapForTracker } from '../utils/studyWorkspaceLogic';
+import {
+  buildDefaultRecapForTracker,
+  buildConceptMentorQuickPrompts,
+  ConceptMentorMode,
+} from '../utils/studyWorkspaceLogic';
 
 interface AIMentorViewProps {
   tracker: Tracker;
@@ -60,7 +62,7 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
     return completedLessons.map(l => l.id).join('-');
   }, [completedLessons]);
 
-  // Recap State initialized dynamically for the active course (never hardcoded DSA when on another subject)
+  // Recap State initialized dynamically for the active course
   const [recapData, setRecapData] = useState<AIRecapData>(() => {
     const cached = aiMentorStorage.getDailyRecap(tracker.title, completedSignature);
     if (cached) return cached;
@@ -70,10 +72,10 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
   const [isLoadingRecap, setIsLoadingRecap] = useState<boolean>(false);
   const [revealedHints, setRevealedHints] = useState<Record<number, boolean>>({});
 
-  // Tutor State with localStorage cache integration & explanation style
+  // Tutor State with localStorage cache integration & mode selection ('simple' = Professor Mode, 'technical' = Technical Mode)
   const [userQuestion, setUserQuestion] = useState<string>('');
   const [userCode, setUserCode] = useState<string>('');
-  const [explanationStyle, setExplanationStyle] = useState<'simple' | 'interview'>('simple');
+  const [explanationStyle, setExplanationStyle] = useState<ConceptMentorMode>('simple');
   const [isLoadingTutor, setIsLoadingTutor] = useState<boolean>(false);
   const [tutorAnswer, setTutorAnswer] = useState<ConceptTutorAnswer | null>(null);
   const [isCachedResult, setIsCachedResult] = useState<boolean>(false);
@@ -82,28 +84,16 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
   const [hasAnsweredQuiz, setHasAnsweredQuiz] = useState<boolean>(false);
   const [previousDoubts, setPreviousDoubts] = useState<Array<{ question: string; timestamp: number }>>([]);
 
-  // Dynamic lesson-tailored quick doubt chips adapted to Professor Mode vs Interviewer Mode
-  const quickDoubtChips = React.useMemo(() => {
-    const concepts = currentLesson?.keyConcepts || [];
-    const firstConcept = concepts[0] || currentLesson?.title || 'this topic';
-    const secondConcept = concepts[1] || 'time complexity';
-
-    if (explanationStyle === 'interview') {
-      return [
-        `What do interviewers actually ask on ${firstConcept} & what answer do they expect?`,
-        `Give me optimal interview code for ${firstConcept} & explain each line of code`,
-        `What are the follow-up trap questions and edge cases on ${currentLesson?.title || 'this topic'}?`,
-        `How to explain brute-force vs optimal ${secondConcept} in an interview?`,
-      ];
-    }
-
-    return [
-      `Teach me ${firstConcept} like I am a beginner with a real-world example`,
-      `Walk me through ${currentLesson?.title || 'this lesson'} step-by-step on a tiny example`,
-      `Show me simple code for ${firstConcept} and explain each line of code`,
-      `Why is ${secondConcept} faster than brute force in everyday words?`,
-    ];
-  }, [currentLesson, explanationStyle]);
+  // Dynamic lesson-tailored 1-click quick prompts adapted to Professor Mode (Beginner) vs Technical Mode (Deep Dive + Code)
+  const quickDoubtChips = React.useMemo(
+    () =>
+      buildConceptMentorQuickPrompts(
+        explanationStyle,
+        currentLesson?.title || tracker.title,
+        currentLesson?.keyConcepts || []
+      ),
+    [currentLesson, tracker.title, explanationStyle]
+  );
 
   // Load previously asked doubts and reset tutor/recap state whenever active course or lesson changes
   useEffect(() => {
@@ -167,12 +157,12 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
     }
   };
 
-  // Submit Question to Concept Tutor with instant cache check & strict 6.5s client timeout
+  // Submit Question to Concept Tutor with instant cache check & strict client timeout
   const queryConceptTutor = async (
     questionText: string,
     codeText: string = userCode,
     forceBypassCache: boolean = false,
-    styleOverride: 'simple' | 'interview' = explanationStyle
+    styleOverride: ConceptMentorMode = explanationStyle
   ) => {
     const trimmedQ = questionText.trim();
     if (!trimmedQ) return;
@@ -197,7 +187,8 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
       tracker.title,
       currentLesson,
       trimmedQ,
-      tracker.category
+      tracker.category,
+      styleOverride
     );
     setTutorAnswer(instantAnswer);
     setQuizSelection(null);
@@ -239,7 +230,7 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
         throw new Error(data.error || 'Failed to get answer');
       }
     } catch (e) {
-      console.warn('Keeping instant Professor + Interviewer answer:', e);
+      console.warn('Keeping instant Concept & Technical Mentor answer:', e);
       aiMentorStorage.setConceptAnswer(tracker.title, lessonName, trimmedQ, instantAnswer, styleOverride);
       const updatedList = aiMentorStorage.getPreviousQuestionsForLesson(tracker.title, lessonName);
       setPreviousDoubts(updatedList.map(e => ({ question: e.question, timestamp: e.timestamp })));
@@ -259,7 +250,7 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
     queryConceptTutor(promptText, userCode);
   };
 
-  const handleStyleSwitch = (newStyle: 'simple' | 'interview') => {
+  const handleStyleSwitch = (newStyle: ConceptMentorMode) => {
     setExplanationStyle(newStyle);
     if (userQuestion.trim() && tutorAnswer) {
       queryConceptTutor(userQuestion, userCode, false, newStyle);
@@ -270,51 +261,65 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
     setRevealedHints(prev => ({ ...prev, [idx]: !prev[idx] }));
   };
 
-  // Helper to render the Interviewer Q&A section
-  const renderInterviewSection = (ans: ConceptTutorAnswer) => {
-    if (!ans.interviewPerspective) return null;
+  // Helper to render the Technical Deep-Dive Architecture & Memory Behavior section
+  const renderTechnicalDeepDiveSection = (ans: ConceptTutorAnswer) => {
+    const deepDive =
+      ans.technicalDeepDive ||
+      (ans.interviewPerspective
+        ? {
+            exactDefinition: ans.interviewPerspective.actualInterviewQuestion,
+            memoryAndExecutionBehavior: ans.interviewPerspective.whatInterviewerExpects,
+            syntaxAndEdgeCases: ans.interviewPerspective.followUpTrap,
+          }
+        : null);
+
+    if (!deepDive) return null;
+
     return (
-      <div className="p-5 bg-indigo-950 text-white rounded-2xl space-y-4 border border-indigo-800 shadow-sm">
-        <div className="flex items-center justify-between border-b border-indigo-800/80 pb-3">
+      <div
+        data-testid="technical-deep-dive-section"
+        className="p-5 bg-slate-900 text-white rounded-2xl space-y-4 border border-slate-800 shadow-xs"
+      >
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
-            <Briefcase className="w-4 h-4 text-amber-400 shrink-0" />
-            <span className="text-xs font-extrabold uppercase tracking-wider text-amber-300">
-              Real Technical Interview Section (What Interviewers Ask &amp; Expect)
+            <Cpu className="w-4 h-4 text-indigo-400 shrink-0" />
+            <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-300">
+              In-Depth Technical Architecture &amp; Under-the-Hood Execution
             </span>
           </div>
-          <span className="text-[10px] font-semibold px-2 py-0.5 bg-indigo-900 text-indigo-200 rounded-full border border-indigo-700">
-            FAANG / Tech Interview Ready
+          <span className="text-[10px] font-semibold px-2.5 py-0.5 bg-slate-800 text-slate-200 rounded-md border border-slate-700">
+            CS &amp; Systems Engineering
           </span>
         </div>
 
-        {/* 1. Actual Question Asked by Interviewer */}
-        <div className="p-3.5 bg-indigo-900/70 border border-indigo-800 rounded-xl space-y-1">
+        {/* 1. Exact Technical Definition & Internal Invariants */}
+        <div className="p-3.5 bg-slate-800/80 border border-slate-700 rounded-xl space-y-1">
           <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wide block">
-            1. What the Interviewer Actually Asks:
+            1. Exact Technical Definition &amp; Internal Working:
           </span>
           <p className="text-xs font-semibold text-white leading-relaxed">
-            {ans.interviewPerspective.actualInterviewQuestion}
+            {deepDive.exactDefinition}
           </p>
         </div>
 
-        {/* 2. What Interviewer Expects You to Answer */}
-        <div className="p-3.5 bg-indigo-900/40 border border-indigo-800/80 rounded-xl space-y-1">
+        {/* 2. Memory Layout & Runtime Execution Behavior */}
+        <div className="p-3.5 bg-slate-800/50 border border-slate-700/80 rounded-xl space-y-1">
           <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wide block">
-            2. Exact Answer &amp; Approach the Interviewer Expects:
+            2. Memory Layout &amp; Under-the-Hood Execution Behavior:
           </span>
-          <p className="text-xs text-indigo-100 leading-relaxed">
-            {ans.interviewPerspective.whatInterviewerExpects}
+          <p className="text-xs text-slate-200 leading-relaxed">
+            {deepDive.memoryAndExecutionBehavior}
           </p>
         </div>
 
-        {/* 3. Follow-Up Trap Question */}
-        {ans.interviewPerspective.followUpTrap && (
+        {/* 3. Syntax Rules & Edge Cases */}
+        {deepDive.syntaxAndEdgeCases && (
           <div className="p-3.5 bg-amber-500/10 border border-amber-400/30 rounded-xl space-y-1">
             <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wide block">
-              3. Classic Follow-Up Question to Watch Out For:
+              3. Syntax Rules, Boundary Conditions &amp; Production Edge Cases:
             </span>
             <p className="text-xs text-amber-100 leading-relaxed">
-              {ans.interviewPerspective.followUpTrap}
+              {deepDive.syntaxAndEdgeCases}
             </p>
           </div>
         )}
@@ -329,13 +334,13 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
         <div>
           <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold mb-1">
             <GraduationCap className="w-4 h-4" />
-            <span>Professor-Style Concept Mentor &amp; Technical Interview Coach</span>
+            <span>Concept &amp; Technical Architecture Mentor</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Learn Like a Beginner with a Professor, Answer Like a Pro in Interviews
+            Learn Intuitive Fundamentals or Dive Deep into Technical Internals
           </h1>
           <p className="text-xs text-slate-600 mt-1 max-w-3xl">
-            Every doubt is cleared with a relatable real-world example, a beginner-friendly step-by-step whiteboard walkthrough, actual interviewer questions &amp; expected answers, and line-by-line code explanations.
+            Switch seamlessly between friendly Professor explanations with everyday analogies and rigorous Technical Deep Dives covering memory layout, execution behavior, syntax rules, and complexity analysis.
           </p>
         </div>
 
@@ -353,7 +358,7 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
               <span>Instructor: {tracker.instructor}</span>
             </div>
             <p className="text-[11px] text-slate-600 leading-relaxed">
-              <strong>AI Transparency Notice:</strong> Concept explanations, code walkthroughs, and interview questions are generated from your verified course syllabus metadata (<strong>{currentLesson?.title || tracker.title}</strong>) and core subject knowledge. The assistant does not claim access to full private video transcripts.
+              <strong>AI Transparency Notice:</strong> Concept explanations, code walkthroughs, and in-depth technical architectures are generated from your verified course syllabus metadata (<strong>{currentLesson?.title || tracker.title}</strong>) and core subject knowledge. The assistant does not claim access to full private video transcripts.
             </p>
           </div>
           <div className="flex flex-col sm:items-end gap-1 shrink-0">
@@ -368,16 +373,19 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
         </div>
       </div>
 
-      {/* Section 1: 1-on-1 Concept Tutor & Doubt Clearance */}
+      {/* Section 1: 1-on-1 Concept & Technical Mentor */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
           <div>
             <div className="flex items-center gap-2">
               <GraduationCap className="w-5 h-5 text-indigo-600" />
-              <h2 className="text-base font-bold text-slate-900">
-                1-on-1 Professor &amp; Interview Mentor
+              <h2
+                data-testid="concept-mentor-heading"
+                className="text-base font-bold text-slate-900"
+              >
+                1-on-1 Concept &amp; Technical Mentor
               </h2>
-              <span className="text-[11px] font-semibold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full inline-flex items-center gap-1">
+              <span className="text-[11px] font-semibold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md inline-flex items-center gap-1">
                 <Zap className="w-3 h-3 text-emerald-600" />
                 <span>Fast ~2.5s Response</span>
               </span>
@@ -387,10 +395,16 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
             </p>
           </div>
 
-          {/* Mode Toggle: Professor Mode (Beginner) vs Interviewer Mode */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 self-start sm:self-auto">
+          {/* Mode Toggle: Professor Mode (Beginner) vs Technical Mode (Deep Dive + Code) */}
+          <div
+            role="group"
+            aria-label="Concept Mentor Explanation Mode"
+            className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 self-start sm:self-auto"
+          >
             <button
               type="button"
+              data-testid="mentor-mode-professor"
+              aria-pressed={explanationStyle === 'simple'}
               onClick={() => handleStyleSwitch('simple')}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                 explanationStyle === 'simple'
@@ -403,15 +417,17 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
             </button>
             <button
               type="button"
-              onClick={() => handleStyleSwitch('interview')}
+              data-testid="mentor-mode-technical"
+              aria-pressed={explanationStyle === 'technical'}
+              onClick={() => handleStyleSwitch('technical')}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                explanationStyle === 'interview'
+                explanationStyle === 'technical'
                   ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Briefcase className="w-3.5 h-3.5 text-amber-600" />
-              <span>Interviewer Mode (Q&amp;A + Code)</span>
+              <Cpu className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Technical Mode (Deep Dive + Code)</span>
             </button>
           </div>
         </div>
@@ -419,27 +435,38 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
         {/* Prompt Input Form */}
         <form onSubmit={handleAskTutor} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Ask your Professor any concept or interview question:
+            <label
+              htmlFor="concept-mentor-question-input"
+              data-testid="concept-mentor-input-label"
+              className="block text-xs font-semibold text-slate-700 mb-1.5"
+            >
+              Ask your Mentor any concept or technical question:
             </label>
             <div className="flex flex-col sm:flex-row gap-2">
               <input
+                id="concept-mentor-question-input"
+                data-testid="concept-mentor-question-input"
                 type="text"
                 value={userQuestion}
                 onChange={e => setUserQuestion(e.target.value)}
-                placeholder="e.g. Why do we use a Hash Map? Or: What do interviewers ask about recursion?"
+                placeholder="e.g. How do Strings work in Python? Or: How are immutable strings stored in memory?"
                 className="flex-1 text-xs px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                 disabled={isLoadingTutor}
               />
               <button
                 type="submit"
+                data-testid="concept-mentor-submit-btn"
                 disabled={isLoadingTutor || !userQuestion.trim()}
-                className="flex items-center justify-center gap-2 px-5 py-3 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50 shrink-0"
+                className="flex items-center justify-center gap-2 px-5 py-3 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50 shrink-0"
               >
                 {isLoadingTutor ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Professor is explaining...</span>
+                    <span>
+                      {explanationStyle === 'technical'
+                        ? 'Analyzing Technical Internals...'
+                        : 'Professor is explaining...'}
+                    </span>
                   </>
                 ) : (
                   <>
@@ -451,18 +478,26 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
             </div>
 
             {/* 1-Click Lesson-Aware Fast Concept Chips */}
-            <div className="flex flex-wrap items-center gap-1.5 mt-3">
+            <div
+              data-testid="concept-mentor-quick-chips"
+              className="flex flex-wrap items-center gap-1.5 mt-3"
+            >
               <span className="text-[11px] text-slate-500 font-semibold flex items-center gap-1">
                 <Zap className="w-3 h-3 text-amber-500" />
-                <span>1-Click Ask Professor:</span>
+                <span>
+                  {explanationStyle === 'technical'
+                    ? '1-Click Technical Deep Dive:'
+                    : '1-Click Ask Professor:'}
+                </span>
               </span>
               {quickDoubtChips.map((chip, idx) => (
                 <button
                   key={idx}
                   type="button"
+                  data-testid={`mentor-quick-chip-${idx}`}
                   disabled={isLoadingTutor}
                   onClick={() => handleQuickPrompt(chip)}
-                  className="text-[11px] px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 text-slate-700 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                  className="text-[11px] px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 text-slate-700 border border-slate-200 rounded-lg transition-colors cursor-pointer text-left"
                 >
                   {chip}
                 </button>
@@ -473,13 +508,13 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
           <details className="group">
             <summary className="text-xs font-medium text-slate-500 hover:text-indigo-600 cursor-pointer list-none flex items-center gap-1.5 select-none">
               <Code2 className="w-3.5 h-3.5" />
-              <span>+ Paste your own code to get a line-by-line Professor explanation (optional)</span>
+              <span>+ Paste your own code to get a line-by-line Mentor explanation (optional)</span>
             </summary>
             <div className="mt-2">
               <textarea
                 value={userCode}
                 onChange={e => setUserCode(e.target.value)}
-                placeholder="Paste your code here and the Professor will explain each line in plain English..."
+                placeholder="Paste your code here and the Mentor will explain each line and its execution behavior..."
                 rows={3}
                 className="w-full font-mono text-xs p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none bg-slate-50/40"
                 disabled={isLoadingTutor}
@@ -533,13 +568,13 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
             <Loader2 className="w-5 h-5 text-indigo-600 animate-spin shrink-0" />
             <div>
               <strong className="block font-semibold">
-                {explanationStyle === 'interview'
-                  ? 'Preparing actual interviewer questions, expected answers, and line-by-line optimal code...'
-                  : 'Your Professor is preparing a real-world example, beginner step-by-step walkthrough, and line-by-line code explanation...'}
+                {explanationStyle === 'technical'
+                  ? 'Preparing exact technical definitions, memory & execution internals, syntax rules, and production code...'
+                  : 'Your Professor is preparing a real-world analogy, beginner step-by-step walkthrough, and line-by-line code explanation...'}
               </strong>
               <span className="text-indigo-700 text-[11px]">
-                {explanationStyle === 'interview'
-                  ? 'Tailored to what technical interviewers ask and expect you to explain.'
+                {explanationStyle === 'technical'
+                  ? 'Engineered from a strict computer science and software architecture perspective.'
                   : 'Designed for a beginner student to understand on the very first read.'}
               </span>
             </div>
@@ -548,28 +583,36 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
 
         {/* Tutor Response Card */}
         {tutorAnswer && (
-          <div className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-2xl space-y-6">
+          <div
+            data-testid="concept-mentor-response-card"
+            className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-2xl space-y-6"
+          >
             {/* Top Bar: Header + Speed Badge */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
               <div className="flex items-center gap-2">
-                {explanationStyle === 'interview' ? (
-                  <Briefcase className="w-4 h-4 text-amber-600" />
+                {explanationStyle === 'technical' ? (
+                  <Cpu className="w-4 h-4 text-indigo-600" />
                 ) : (
                   <GraduationCap className="w-4 h-4 text-indigo-600" />
                 )}
                 <span className="text-xs uppercase tracking-wider font-extrabold text-indigo-600">
-                  {explanationStyle === 'interview'
-                    ? 'Technical Interviewer Answer & Code Walkthrough'
+                  {explanationStyle === 'technical'
+                    ? 'Technical Deep Dive & Production Code Walkthrough'
                     : 'Professor’s Direct Explanation (Beginner Friendly)'}
                 </span>
-                <span className="text-[11px] px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 font-medium">
-                  {explanationStyle === 'simple' ? 'Professor Mode' : 'Interviewer Mode'}
+                <span
+                  data-testid="active-mentor-mode-badge"
+                  className="text-[11px] px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 font-medium"
+                >
+                  {explanationStyle === 'simple'
+                    ? 'Professor Mode (Beginner)'
+                    : 'Technical Mode (Deep Dive + Code)'}
                 </span>
               </div>
 
               <div className="flex items-center gap-2 self-start sm:self-auto">
                 {responseTimeMs !== null && (
-                  <span className="text-[11px] font-mono text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 font-semibold">
+                  <span className="text-[11px] font-mono text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md inline-flex items-center gap-1 font-semibold">
                     <Zap className="w-3 h-3 text-emerald-600" />
                     <span>
                       {isCachedResult || responseTimeMs === 0
@@ -590,20 +633,22 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
               </div>
             </div>
 
-            {/* 1. Professor's Direct Plain-English Answer */}
+            {/* 1. Direct Answer */}
             <div className="p-4 bg-white border border-indigo-100 rounded-xl shadow-2xs">
               <p className="text-sm font-bold text-slate-900 leading-relaxed">
                 {tutorAnswer.directAnswer}
               </p>
             </div>
 
-            {/* 2. Concrete Real-World Example (Always shown right below the direct answer) */}
+            {/* 2. Real-World Analogy / Architectural Mental Model */}
             {tutorAnswer.realWorldAnalogy && (
               <div className="p-4 bg-amber-50/90 border border-amber-200 rounded-xl flex items-start gap-3">
                 <Compass className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                 <div className="text-xs space-y-1">
                   <strong className="text-amber-950 font-extrabold block uppercase tracking-wide text-[11px]">
-                    Real-World Example (Imagine This in Everyday Life)
+                    {explanationStyle === 'technical'
+                      ? 'System & Runtime Mental Model'
+                      : 'Real-World Analogy (Imagine This in Everyday Life)'}
                   </strong>
                   <p className="text-amber-950 leading-relaxed font-medium">
                     {tutorAnswer.realWorldAnalogy}
@@ -612,17 +657,17 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
               </div>
             )}
 
-            {/* If Interviewer Mode is selected, promote the Interview Q&A Section right here */}
-            {explanationStyle === 'interview' && renderInterviewSection(tutorAnswer)}
+            {/* If Technical Mode is selected, render the Technical Deep-Dive Architecture section */}
+            {explanationStyle === 'technical' && renderTechnicalDeepDiveSection(tutorAnswer)}
 
-            {/* 3. Professor's Step-by-Step Whiteboard Breakdown */}
+            {/* 3. Step-by-Step Breakdown */}
             {tutorAnswer.stepByStepBreakdown && tutorAnswer.stepByStepBreakdown.length > 0 && (
               <div className="space-y-2.5">
                 <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <ListOrdered className="w-4 h-4 text-indigo-600" />
                   <span>
-                    {explanationStyle === 'interview'
-                      ? 'Step-by-Step Optimal Interview Approach:'
+                    {explanationStyle === 'technical'
+                      ? 'Step-by-Step Internal Execution & Algorithmic Workflow:'
                       : 'Step-by-Step Whiteboard Walkthrough (For Beginners):'}
                   </span>
                 </h4>
@@ -662,7 +707,11 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
                   <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2.5">
                     <span className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
                       <Code2 className="w-4 h-4 text-indigo-600" />
-                      <span>Line-by-Line Code Explanation (What Each Line Does):</span>
+                      <span>
+                        {explanationStyle === 'technical'
+                          ? 'Line-by-Line Execution Semantics & Memory Analysis:'
+                          : 'Line-by-Line Code Explanation (What Each Line Does):'}
+                      </span>
                     </span>
                     <div className="divide-y divide-slate-100">
                       {tutorAnswer.codeExample.lineByLine.map((item, lIdx) => (
@@ -685,7 +734,7 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
               </div>
             )}
 
-            {/* 5. Simple Time & Space Complexity + #1 Beginner Mistake */}
+            {/* 5. Time & Space Complexity + Common Pitfall */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-200 pt-4">
               {tutorAnswer.complexitySimple && (
                 <>
@@ -716,7 +765,9 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
                 <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                 <div>
                   <strong className="text-rose-950 font-bold block mb-0.5">
-                    Professor’s Warning (#1 Beginner Mistake to Avoid):
+                    {explanationStyle === 'technical'
+                      ? 'Technical Pitfall & Edge-Case Warning:'
+                      : 'Professor’s Warning (#1 Beginner Mistake to Avoid):'}
                   </strong>
                   <span className="text-rose-900 leading-relaxed">
                     {tutorAnswer.commonMistake}
@@ -727,7 +778,11 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
 
             {/* Detailed Summary */}
             <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-line border-t border-slate-200 pt-3">
-              <strong className="text-slate-900 block mb-1">Professor’s Final Summary:</strong>
+              <strong className="text-slate-900 block mb-1">
+                {explanationStyle === 'technical'
+                  ? 'Engineering Takeaway & Best Practices:'
+                  : 'Professor’s Final Summary:'}
+              </strong>
               {tutorAnswer.detailedExplanation}
             </div>
 
@@ -777,7 +832,7 @@ export const AIMentorView: React.FC<AIMentorViewProps> = ({ tracker, streakDays 
 
                 {hasAnsweredQuiz && (
                   <div className="text-xs text-slate-700 p-3 bg-white border border-slate-200 rounded-xl">
-                    <strong className="text-slate-900">Professor’s Feedback: </strong>
+                    <strong className="text-slate-900">Mentor’s Feedback: </strong>
                     {tutorAnswer.quickCheckQuestion.explanation}
                   </div>
                 )}
