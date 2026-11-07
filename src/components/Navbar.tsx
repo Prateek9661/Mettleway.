@@ -39,7 +39,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               isDeepWork ? 'text-white hover:text-indigo-400' : 'text-slate-900 hover:text-indigo-600'
             }`}
           >
-            DevTrack
+            Mettleway.
           </button>
 
           {/* Zone 2: 5 concise single-line text navigation links */}
