@@ -12,6 +12,7 @@ import { CourseLibraryView } from './components/CourseLibraryView';
 import { StudentOnboardingModal } from './components/StudentOnboardingModal';
 import { MyProfileView } from './components/MyProfileView';
 import { MyNotesLibraryView } from './components/MyNotesLibraryView';
+import { LockDailyScheduleModal } from './components/LockDailyScheduleModal';
 import { Tracker, StudySquad, LearnerProfile, DailyLogEntry, NoteTag } from './types';
 import { PRESET_TRACKERS, INITIAL_SQUADS, INITIAL_DAILY_LOGS } from './utils/mockPresets';
 import { soundAlert } from './utils/audioAlert';
@@ -42,6 +43,12 @@ import {
   formatSecondsToTimestamp,
   isLearnerProfileCreated,
   DEFAULT_AVATAR_OPTIONS,
+  MettlewayScheduleData,
+  loadMettlewaySchedule,
+  saveMettlewaySchedule,
+  formatMettlewayDailyClassBadge,
+  isWithinScheduledClassWindow,
+  buildDynamicTrackerFromInput,
 } from './utils/studyWorkspaceLogic';
 import {
   Bell,
@@ -56,6 +63,7 @@ import {
   Shield,
   Users,
   UserPlus,
+  Youtube,
 } from 'lucide-react';
 
 export default function App() {
@@ -149,8 +157,10 @@ export default function App() {
   // Sound mute state
   const [isMuted, setIsMuted] = useState<boolean>(() => soundAlert.isMuted);
 
-  // Create Modal & Onboarding Modal state
+  // Create Modal, Lock Schedule Modal & Onboarding Modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+  const [isLockScheduleModalOpen, setIsLockScheduleModalOpen] = useState<boolean>(false);
+  const [quickPlaylistUrl, setQuickPlaylistUrl] = useState<string>('');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState<boolean>(() => {
     try {
@@ -163,12 +173,25 @@ export default function App() {
     'onboarding'
   );
 
+  // Mettleway. Daily Class Schedule & Attendance Streak state (persisted under `mettleway_schedule`)
+  const [mettlewaySchedule, setMettlewaySchedule] = useState<MettlewayScheduleData>(() =>
+    loadMettlewaySchedule(4, "Striver's A2Z DSA Master Path")
+  );
+
   // Deep Work distraction-free mode state
   const [isDeepWork, setIsDeepWork] = useState<boolean>(false);
 
-  // Active Scheduled Session In-App Alert banner
+  // Active Scheduled Session In-App Alert banner & Smooth Alarm Confirmation Toast
   const [scheduledAlertBanner, setScheduledAlertBanner] = useState<string | null>(null);
+  const [alarmConfirmationToast, setAlarmConfirmationToast] = useState<string | null>(null);
   const [lastAlertFiredDate, setLastAlertFiredDate] = useState<string>('');
+
+  const showSmoothAlarmToast = (msg: string) => {
+    setAlarmConfirmationToast(msg);
+    setTimeout(() => {
+      setAlarmConfirmationToast(prev => (prev === msg ? null : prev));
+    }, 4500);
+  };
 
   // Toggle Deep Work mode: hides non-essential views and focuses on active session
   const handleToggleDeepWork = () => {
@@ -223,10 +246,12 @@ export default function App() {
     } catch {}
   }, [squads]);
 
-  // Persist streak
+  // Persist streak and keep mettleway_schedule streak synchronized
   useEffect(() => {
     try {
       localStorage.setItem('devtrack_streak', streakDays.toString());
+      const updated = saveMettlewaySchedule({ streakDays });
+      setMettlewaySchedule(updated);
     } catch {}
   }, [streakDays]);
 
@@ -384,13 +409,20 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeTracker, lastAlertFiredDate]);
 
-  // Select and record last watched lesson for Continue Learning
+  // Select and record last watched lesson for Continue Learning + verify attendance if within 30m of scheduled class time
   const handleSelectAndRecordLesson = (lessonId: string, targetTrackerId?: string) => {
     const effectiveId = targetTrackerId || activeTrackerId;
     setSelectedLessonId(lessonId);
     setTrackers(prev =>
       prev.map(t => (t.id === effectiveId ? recordLastWatchedLesson(t, lessonId) : t))
     );
+    if (isWithinScheduledClassWindow(mettlewaySchedule.scheduledTime24, new Date(), 30)) {
+      const verified = saveMettlewaySchedule({
+        attendanceVerifiedToday: true,
+        streakDays,
+      });
+      setMettlewaySchedule(verified);
+    }
   };
 
   // Log daily study activity minutes
@@ -736,7 +768,10 @@ export default function App() {
   };
 
   // Save new tracker and immediately set as active course
-  const handleSaveTracker = (newTracker: Tracker) => {
+  const handleSaveTracker = (
+    newTracker: Tracker,
+    options?: { openScheduleModal?: boolean }
+  ) => {
     const sanitized = sanitizeAndSyncTracker({
       ...newTracker,
       lastAccessedAt: new Date().toISOString(),
@@ -745,11 +780,46 @@ export default function App() {
     setTrackers(prev => [sanitized, ...prev.filter(t => t.id !== sanitized.id)]);
     setActiveTrackerId(sanitized.id);
     setSelectedLessonId(sanitized.modules[0]?.lessons[0]?.id || null);
+    const updatedSched = saveMettlewaySchedule({
+      scheduledTime24: sanitized.scheduledTime || mettlewaySchedule.scheduledTime24 || '16:00',
+      durationMinutes: sanitized.dailyMinutesTarget || mettlewaySchedule.durationMinutes || 60,
+      courseName: sanitized.title,
+      streakDays,
+    });
+    setMettlewaySchedule(updatedSched);
     setActiveTab('today');
+    if (options?.openScheduleModal) {
+      setIsLockScheduleModalOpen(true);
+    } else {
+      setIsLockScheduleModalOpen(false);
+      showSmoothAlarmToast(
+        `⚡ Daily Class Alarm locked for ${updatedSched.formattedTime12} (${updatedSched.durationMinutes} mins) — welcome to ${sanitized.title}!`
+      );
+    }
   };
 
-  // Update schedule configuration
-  const handleUpdateSchedule = (newTime: string, newDuration: number, newDays: number[]) => {
+  // Handle quick YouTube playlist paste to create roadmap and immediately open Lock Your Daily Class Schedule modal
+  const handleQuickPastePlaylist = (rawUrl: string) => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return;
+    const dynamicTracker = buildDynamicTrackerFromInput({
+      inputUrl: trimmed,
+      dailyMinutes: mettlewaySchedule.durationMinutes || 60,
+      scheduledTime: mettlewaySchedule.scheduledTime24 || '16:00',
+      studyDays: [1, 2, 3, 4, 5, 6],
+      trackerId: `tracker-${Date.now()}`,
+    });
+    handleSaveTracker(dynamicTracker, { openScheduleModal: true });
+    setQuickPlaylistUrl('');
+  };
+
+  // Update schedule configuration & smoothly return to main platform page when saved
+  const handleUpdateSchedule = (
+    newTime: string,
+    newDuration: number,
+    newDays: number[],
+    options?: { returnToPlatform?: boolean; toastMessage?: string }
+  ) => {
     setTrackers(prev =>
       prev.map(t =>
         t.id === activeTrackerId
@@ -762,6 +832,21 @@ export default function App() {
           : t
       )
     );
+    const updatedSched = saveMettlewaySchedule({
+      scheduledTime24: newTime,
+      durationMinutes: newDuration,
+      courseName: activeTracker?.title || mettlewaySchedule.courseName,
+      streakDays,
+    });
+    setMettlewaySchedule(updatedSched);
+    if (options?.returnToPlatform !== false) {
+      setIsLockScheduleModalOpen(false);
+      setActiveTab('today');
+      showSmoothAlarmToast(
+        options?.toastMessage ||
+          `⚡ Daily Class Alarm locked for ${updatedSched.formattedTime12} (${updatedSched.durationMinutes} mins) — back to your learning workspace!`
+      );
+    }
   };
 
   // Send cheer in squad
@@ -845,6 +930,25 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 font-sans">
+      {/* Smooth Floating Confirmation Toast when Alarm is Locked & Returned to Platform */}
+      {alarmConfirmationToast && (
+        <div
+          data-testid="alarm-confirmation-toast"
+          className="fixed bottom-6 right-6 z-50 bg-zinc-950 text-amber-300 px-4 py-3 rounded-xl shadow-2xl border border-amber-500/50 text-xs sm:text-sm font-bold flex items-center gap-2.5"
+        >
+          <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>{alarmConfirmationToast}</span>
+          <button
+            type="button"
+            onClick={() => setAlarmConfirmationToast(null)}
+            aria-label="Dismiss notification"
+            className="p-1 text-zinc-400 hover:text-white rounded cursor-pointer ml-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Scheduled Alert Floating Banner if fired */}
       {scheduledAlertBanner && (
         <div className="bg-indigo-600 text-white px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-medium z-50">
@@ -879,20 +983,23 @@ export default function App() {
         isMuted={isMuted}
         toggleMute={handleToggleMute}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
-        scheduledTime={activeTracker?.scheduledTime || '20:00'}
+        scheduledTime={mettlewaySchedule.scheduledTime24 || activeTracker?.scheduledTime || '16:00'}
         isDeepWork={isDeepWork}
         onToggleDeepWork={handleToggleDeepWork}
       />
 
-      {/* Learner Study Desk Utility Strip (Hidden in Deep Work mode to minimize distractions) */}
+      {/* Mettleway. Obsidian Dark + Forge Amber Dashboard Header Bar */}
       {!isDeepWork && (
-        <div className="bg-white border-b border-slate-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-4 text-xs">
-            {/* Active Study Course Selector */}
-            <div className="flex flex-wrap items-center gap-3">
-              <label htmlFor="active-course-select" className="font-semibold text-slate-500 flex items-center gap-1.5">
-                <BookOpen className={`w-3.5 h-3.5 ${themeTokens.accentText}`} />
-                <span>Active Course:</span>
+        <div className="bg-zinc-950 border-b border-zinc-800 text-zinc-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+            {/* Left: Active Study Course Selector + Quick YouTube Playlist Paste Input + Daily Class Badge + Attendance Verified Badge */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <label
+                htmlFor="active-course-select"
+                className="font-bold text-amber-400 flex items-center gap-1.5"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                <span>Course:</span>
               </label>
               <select
                 id="active-course-select"
@@ -901,66 +1008,120 @@ export default function App() {
                   const nextId = e.target.value;
                   setActiveTrackerId(nextId);
                   setSelectedLessonId(null);
+                  const found = trackers.find(t => t.id === nextId);
+                  if (found) {
+                    const updated = saveMettlewaySchedule({ courseName: found.title });
+                    setMettlewaySchedule(updated);
+                  }
                 }}
-                className="bg-slate-50 border border-slate-200 text-slate-900 font-semibold rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
+                className="bg-zinc-900 border border-zinc-700 text-zinc-100 font-semibold rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none cursor-pointer max-w-[230px] truncate"
               >
                 {trackers.map(t => (
-                  <option key={t.id} value={t.id}>
+                  <option key={t.id} value={t.id} className="bg-zinc-900 text-zinc-100">
                     {t.title} ({t.category})
                   </option>
                 ))}
               </select>
 
-              {/* Unboxed Course Progress Metadata */}
-              <div className="hidden sm:flex items-center gap-2 text-slate-500 pl-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="font-mono tabular-nums font-semibold text-slate-800">
-                  {courseStats.completed}/{courseStats.total} lessons done ({courseStats.percent}%)
-                </span>
+              {/* Quick Paste YouTube Playlist Input to Create Roadmap & Open Lock Schedule Modal */}
+              <div className="relative flex items-center">
+                <Youtube className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  data-testid="quick-paste-playlist-input"
+                  value={quickPlaylistUrl}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setQuickPlaylistUrl(val);
+                    if (/youtu\.?be/i.test(val.trim())) {
+                      handleQuickPastePlaylist(val);
+                    }
+                  }}
+                  onPaste={e => {
+                    const pasted = e.clipboardData?.getData('text') || '';
+                    if (pasted.trim()) {
+                      e.preventDefault();
+                      handleQuickPastePlaylist(pasted);
+                    }
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && quickPlaylistUrl.trim()) {
+                      e.preventDefault();
+                      handleQuickPastePlaylist(quickPlaylistUrl);
+                    }
+                  }}
+                  placeholder="Paste YouTube playlist to lock daily class..."
+                  aria-label="Paste YouTube playlist to create roadmap"
+                  className="bg-zinc-900 border border-zinc-700 focus:border-amber-500 text-zinc-100 placeholder-zinc-400 rounded-lg pl-8 pr-2.5 py-1 text-xs w-56 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
               </div>
+
+              {/* Dashboard Header Status Badge: "⚡ Daily Class: 04:00 PM | Attendance Streak" */}
+              <button
+                type="button"
+                data-testid="mettleway-daily-class-badge"
+                onClick={() => setIsLockScheduleModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-amber-500/50 text-amber-400 font-extrabold text-xs transition-colors cursor-pointer whitespace-nowrap shrink-0 shadow-xs"
+                title="Click to lock your daily class schedule & sync to Google Calendar"
+              >
+                <span>{formatMettlewayDailyClassBadge(mettlewaySchedule.scheduledTime24)}</span>
+                <span className="font-mono text-amber-300">({streakDays}d)</span>
+              </button>
+
+              {/* Highlight "Attendance Verified (+50 XP)" badge if within 30 mins of scheduled class time */}
+              {(isWithinScheduledClassWindow(mettlewaySchedule.scheduledTime24, new Date(), 30) ||
+                mettlewaySchedule.attendanceVerifiedToday) && (
+                <span
+                  data-testid="attendance-verified-badge"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 text-zinc-950 font-extrabold text-xs whitespace-nowrap shrink-0 shadow-sm"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-zinc-950" />
+                  <span>Attendance Verified (+50 XP)</span>
+                </span>
+              )}
             </div>
 
             {/* Right Learner Status: Roadmap, My Profile, Onboarding, Squads, Schedule, Deep Work, Streak & Sound Toggle */}
-            <div className="flex flex-wrap items-center gap-3.5 text-slate-600 ml-auto">
+            <div className="flex flex-wrap items-center gap-3 text-zinc-300 ml-auto">
               <button
                 type="button"
                 data-testid="nav-tab-curriculum"
                 onClick={() => setActiveTab('curriculum')}
-                className={`flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  activeTab === 'curriculum' ? 'text-indigo-600 font-bold' : ''
+                className={`flex items-center gap-1.5 hover:text-amber-400 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'curriculum' ? 'text-amber-400 font-bold' : ''
                 }`}
                 title="Open Course Syllabus & Study Roadmap"
               >
                 <span>Study Roadmap</span>
               </button>
 
-              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span aria-hidden="true" className="text-zinc-700">·</span>
 
               <button
                 type="button"
                 data-testid="nav-tab-profile"
                 onClick={() => setActiveTab('profile')}
-                className={`flex items-center gap-1.5 hover:text-indigo-600 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  activeTab === 'profile' ? 'text-indigo-600 font-bold' : 'text-slate-700'
+                className={`flex items-center gap-1.5 hover:text-amber-400 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'profile' ? 'text-amber-400 font-bold' : 'text-zinc-200'
                 }`}
                 title="Open Personalized Student Profile & Recommendations"
               >
                 <img
                   src={learnerProfile.avatarUrl || DEFAULT_AVATAR_OPTIONS[0].url}
                   alt={learnerProfile.name || 'Profile'}
-                  className="w-5 h-5 rounded-full object-cover border border-indigo-200"
+                  className="w-5 h-5 rounded-full object-cover border border-amber-500/40"
                 />
                 <span>My Profile ({learnerProfile.name})</span>
               </button>
 
               {!isLearnerProfileCreated(learnerProfile) && (
                 <>
-                  <span aria-hidden="true" className="text-slate-300">·</span>
+                  <span aria-hidden="true" className="text-zinc-700">·</span>
 
                   <button
                     type="button"
                     onClick={() => handleOpenOnboardingWizard('register')}
-                    className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                     title="Create your student profile"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
@@ -969,67 +1130,67 @@ export default function App() {
                 </>
               )}
 
-              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span aria-hidden="true" className="text-zinc-700">·</span>
 
               <button
                 type="button"
                 data-testid="nav-tab-squads"
                 onClick={() => setActiveTab('squads')}
-                className={`flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  activeTab === 'squads' ? 'text-indigo-600 font-bold' : ''
+                className={`flex items-center gap-1.5 hover:text-amber-400 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'squads' ? 'text-amber-400 font-bold' : ''
                 }`}
                 title="Open Peer Study Squads"
               >
-                <Users className="w-3.5 h-3.5 text-slate-400" />
+                <Users className="w-3.5 h-3.5 text-zinc-400" />
                 <span>Study Squads</span>
               </button>
 
-              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span aria-hidden="true" className="text-zinc-700">·</span>
 
               <button
                 type="button"
                 data-testid="nav-tab-schedule"
                 onClick={() => setActiveTab('schedule')}
-                className={`flex items-center gap-1.5 hover:text-indigo-600 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  activeTab === 'schedule' ? 'text-indigo-600 font-bold' : ''
+                className={`flex items-center gap-1.5 hover:text-amber-400 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'schedule' ? 'text-amber-400 font-bold' : ''
                 }`}
                 title="Change daily study reminder time & ICS calendar sync"
               >
-                <Clock className="w-3.5 h-3.5 text-slate-400" />
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
                 <span className="font-mono tabular-nums">
-                  Schedule: <strong>{activeTracker?.scheduledTime || '20:00'}</strong>
+                  Schedule: <strong>{mettlewaySchedule.formattedTime12}</strong>
                 </span>
               </button>
 
-              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span aria-hidden="true" className="text-zinc-700">·</span>
 
               <button
                 type="button"
                 data-testid="nav-toggle-deep-work"
                 onClick={handleToggleDeepWork}
-                className="flex items-center gap-1 text-slate-600 hover:text-indigo-600 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                className="flex items-center gap-1 text-zinc-300 hover:text-amber-400 font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 title="Enable Deep Work distraction-free focus mode"
               >
-                <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                <Shield className="w-3.5 h-3.5 text-amber-400" />
                 <span>Deep Work</span>
               </button>
 
-              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span aria-hidden="true" className="text-zinc-700">·</span>
 
               <div
-                className="flex items-center gap-1.5 text-amber-800 font-semibold whitespace-nowrap shrink-0"
+                className="flex items-center gap-1.5 text-amber-400 font-semibold whitespace-nowrap shrink-0"
                 title={`${streakDays} consecutive study days completed`}
               >
                 <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
                 <span className="font-mono tabular-nums">{streakDays} Day Streak</span>
               </div>
 
-              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span aria-hidden="true" className="text-zinc-700">·</span>
 
               <button
                 type="button"
                 onClick={handleToggleMute}
-                className="flex items-center gap-1 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                className="flex items-center gap-1 text-zinc-400 hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 title={isMuted ? 'Unmute study chime' : 'Mute study chime'}
               >
                 {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
@@ -1060,6 +1221,8 @@ export default function App() {
             selectedLessonId={selectedLessonId}
             onSelectLesson={lessonId => handleSelectAndRecordLesson(lessonId)}
             onOpenNotesLibrary={() => setActiveTab('notes')}
+            mettlewaySchedule={mettlewaySchedule}
+            onOpenLockScheduleModal={() => setIsLockScheduleModalOpen(true)}
             onAddVideoNote={handleAddVideoNote}
             onUpdateVideoNote={handleUpdateVideoNote}
             onDeleteVideoNote={handleDeleteVideoNote}
@@ -1074,6 +1237,8 @@ export default function App() {
             streakDays={streakDays}
             dailyLogs={dailyLogs}
             learnerProfile={learnerProfile}
+            mettlewaySchedule={mettlewaySchedule}
+            onOpenLockScheduleModal={() => setIsLockScheduleModalOpen(true)}
             onResumeCourseLesson={(trackerId, lessonId) => {
               setActiveTrackerId(trackerId);
               handleSelectAndRecordLesson(lessonId, trackerId);
@@ -1194,6 +1359,7 @@ export default function App() {
             key={activeTracker.id}
             tracker={activeTracker}
             onUpdateSchedule={handleUpdateSchedule}
+            onReturnToPlatform={() => setActiveTab('today')}
           />
         )}
       </main>
@@ -1203,6 +1369,35 @@ export default function App() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSaveTracker={handleSaveTracker}
+      />
+
+      {/* Mettleway. Accountability Modal: Lock Your Daily Class Schedule */}
+      <LockDailyScheduleModal
+        isOpen={isLockScheduleModalOpen}
+        onClose={() => setIsLockScheduleModalOpen(false)}
+        courseName={activeTracker?.title || mettlewaySchedule.courseName}
+        streakDays={streakDays}
+        scheduleData={mettlewaySchedule}
+        onSaveSchedule={(updated, toastMessage) => {
+          setMettlewaySchedule(updated);
+          if (activeTracker) {
+            setTrackers(prev =>
+              prev.map(t =>
+                t.id === activeTracker.id
+                  ? {
+                      ...t,
+                      scheduledTime: updated.scheduledTime24,
+                      dailyMinutesTarget: updated.durationMinutes,
+                    }
+                  : t
+              )
+            );
+          }
+          if (toastMessage) {
+            setActiveTab('today');
+            showSmoothAlarmToast(toastMessage);
+          }
+        }}
       />
 
       {/* Multi-Step Student Onboarding & Registration Modal */}

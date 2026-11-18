@@ -57,6 +57,9 @@ import {
   getUserScopedStorageKey,
   WorkspaceSideTab,
   formatPlaylistTabLabel,
+  MettlewayScheduleData,
+  formatMettlewayDailyClassBadge,
+  isWithinScheduledClassWindow,
 } from '../utils/studyWorkspaceLogic';
 import { ConfettiCelebration } from './ConfettiCelebration';
 import { PersonalVideoNotesPanel } from './PersonalVideoNotesPanel';
@@ -78,6 +81,8 @@ interface TodaySessionProps {
   selectedLessonId?: string | null;
   onSelectLesson?: (lessonId: string) => void;
   onOpenNotesLibrary?: () => void;
+  mettlewaySchedule?: MettlewayScheduleData;
+  onOpenLockScheduleModal?: () => void;
   onAddVideoNote?: (params: {
     noteId?: string;
     userId?: string;
@@ -123,6 +128,8 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
   selectedLessonId,
   onSelectLesson,
   onOpenNotesLibrary,
+  mettlewaySchedule,
+  onOpenLockScheduleModal,
   onAddVideoNote,
   onUpdateVideoNote,
   onDeleteVideoNote,
@@ -543,8 +550,8 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
 
   const handleTestAlert = () => {
     soundAlert.playSessionAlertChime();
-    soundAlert.fireNotification('DevTrack Session Alert Test', {
-      body: `Your scheduled study time for ${activeTracker?.title || 'DSA'} is active!`,
+    soundAlert.fireNotification('Mettleway. Session Alert Test', {
+      body: `Your scheduled study time for ${activeTracker?.title || 'DSA'} is active on Mettleway.!`,
     });
     setToastMessage('Alert chime played & notification fired.');
     setTimeout(() => setToastMessage(null), 3500);
@@ -679,20 +686,43 @@ export const TodaySession: React.FC<TodaySessionProps> = ({
                 </>
               )}
             </div>
-            <div className="flex flex-wrap items-baseline gap-3">
-              <h1 className="text-lg font-bold tracking-tight text-slate-900">
-                DevTrack: {activeTracker.title}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-lg font-extrabold tracking-tight text-slate-900">
+                Mettleway<span className="text-amber-500">.</span> {activeTracker.title}
               </h1>
               {continueLearningInfo && (
                 <button
                   type="button"
                   onClick={() => handleSelectSpecificLesson(continueLearningInfo.lessonId, 0)}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 hover:text-amber-700 cursor-pointer"
                 >
-                  <Play className="w-3 h-3 fill-indigo-600" />
+                  <Play className="w-3 h-3 fill-amber-600" />
                   <span>Resume Lesson {continueLearningInfo.lessonIndex + 1}</span>
                 </button>
               )}
+              {mettlewaySchedule && (
+                <button
+                  type="button"
+                  onClick={onOpenLockScheduleModal}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-950 border border-amber-500/40 text-amber-400 text-[11px] font-bold hover:border-amber-400 transition-colors cursor-pointer"
+                  title="Click to lock or update your daily Mettleway. class schedule & Google Calendar alarms"
+                >
+                  <span>
+                    {formatMettlewayDailyClassBadge(mettlewaySchedule.scheduledTime24)}
+                  </span>
+                </button>
+              )}
+              {mettlewaySchedule &&
+                (isWithinScheduledClassWindow(mettlewaySchedule.scheduledTime24, new Date(), 30) ||
+                  mettlewaySchedule.attendanceVerifiedToday) && (
+                  <span
+                    data-testid="session-attendance-verified-badge"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 text-zinc-950 text-[11px] font-extrabold shadow-xs"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-zinc-950" />
+                    <span>Attendance Verified (+50 XP)</span>
+                  </span>
+                )}
             </div>
           </div>
 

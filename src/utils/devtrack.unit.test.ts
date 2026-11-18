@@ -78,6 +78,15 @@ import {
   buildConceptMentorQuickPrompts,
   buildConceptMentorSystemPrompt,
   normalizeConceptMentorMode,
+  METTLEWAY_BRAND_NAME,
+  METTLEWAY_SCHEDULE_STORAGE_KEY,
+  DEFAULT_METTLEWAY_CLASS_TIME_24,
+  DEFAULT_METTLEWAY_CLASS_DURATION_MINS,
+  formatTime24To12Hour,
+  formatMettlewayDailyClassBadge,
+  isWithinScheduledClassWindow,
+  buildMettlewayDailyClassCalendarUrl,
+  confirmAndLockMettlewayAlarm,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -1786,6 +1795,71 @@ describe('Unit Tests: Student Onboarding, Personalized Profile & Course-Based Pe
     assert.ok(fallbackTechnical.technicalDeepDive?.exactDefinition);
     assert.ok(fallbackTechnical.technicalDeepDive?.memoryAndExecutionBehavior);
     assert.ok(fallbackTechnical.technicalDeepDive?.syntaxAndEdgeCases);
+  });
+
+  test('15. Mettleway. Daily Class Schedule, Google Calendar RRULE:FREQ=DAILY Sync & Attendance Verification (+50 XP)', () => {
+    assert.equal(METTLEWAY_BRAND_NAME, 'Mettleway.');
+    assert.equal(METTLEWAY_SCHEDULE_STORAGE_KEY, 'mettleway_schedule');
+    assert.equal(DEFAULT_METTLEWAY_CLASS_TIME_24, '16:00');
+    assert.equal(DEFAULT_METTLEWAY_CLASS_DURATION_MINS, 60);
+
+    // 1. Time formatting & Dashboard status badge
+    assert.equal(formatTime24To12Hour('16:00'), '04:00 PM');
+    assert.equal(formatTime24To12Hour('09:30'), '09:30 AM');
+    assert.equal(
+      formatMettlewayDailyClassBadge('16:00'),
+      '⚡ Daily Class: 04:00 PM | Attendance Streak'
+    );
+
+    // 2. Attendance verification within 30 minutes of scheduled class time
+    const refAt415PM = new Date(2026, 4, 15, 16, 15, 0);
+    const refAt340PM = new Date(2026, 4, 15, 15, 40, 0);
+    const refAt600PM = new Date(2026, 4, 15, 18, 0, 0);
+    assert.equal(isWithinScheduledClassWindow('16:00', refAt415PM, 30), true);
+    assert.equal(isWithinScheduledClassWindow('16:00', refAt340PM, 30), true);
+    assert.equal(isWithinScheduledClassWindow('16:00', refAt600PM, 30), false);
+
+    // 3. Recurring Google Calendar template link generation
+    const calendarUrl = buildMettlewayDailyClassCalendarUrl({
+      courseName: "Striver's A2Z DSA Master Path",
+      scheduledTime24: '16:00',
+      durationMinutes: 60,
+      joinUrl: 'http://localhost:3000/',
+      referenceDate: new Date(2026, 4, 15, 10, 0, 0),
+    });
+
+    const parsedCalUrl = new URL(calendarUrl);
+    assert.equal(parsedCalUrl.origin, 'https://calendar.google.com');
+    assert.equal(parsedCalUrl.pathname, '/calendar/render');
+    assert.equal(parsedCalUrl.searchParams.get('action'), 'TEMPLATE');
+    assert.equal(
+      parsedCalUrl.searchParams.get('text'),
+      "🔴 Mettleway. Live Class: Striver's A2Z DSA Master Path"
+    );
+    assert.equal(
+      parsedCalUrl.searchParams.get('details'),
+      'Your daily class is starting now! Keep your streak alive on Mettleway.\n\nJoin Session: http://localhost:3000/'
+    );
+    assert.equal(parsedCalUrl.searchParams.get('recur'), 'RRULE:FREQ=DAILY');
+    assert.match(parsedCalUrl.searchParams.get('dates') || '', /T160000\/.*T170000/);
+
+    // 4. Smooth in-app alarm lock & automatic return to platform workspace ('today')
+    const confirmed = confirmAndLockMettlewayAlarm(
+      {
+        scheduledTime24: '17:30',
+        durationMinutes: 45,
+        courseName: "Striver's A2Z DSA Master Path",
+        streakDays: 5,
+      },
+      new Date(2026, 4, 15, 17, 15, 0)
+    );
+    assert.equal(confirmed.shouldCloseModal, true);
+    assert.equal(confirmed.returnTab, 'today');
+    assert.equal(confirmed.schedule.formattedTime12, '05:30 PM');
+    assert.equal(confirmed.schedule.durationMinutes, 45);
+    assert.equal(confirmed.schedule.attendanceVerifiedToday, true);
+    assert.ok(confirmed.toastMessage.includes('05:30 PM'));
+    assert.ok(confirmed.toastMessage.includes('Mettleway.'));
   });
 });
 

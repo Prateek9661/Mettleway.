@@ -24,6 +24,11 @@ import {
   fetchYouTubeMetadataClientSide,
   parseYouTubeSourceUrl,
   PACING_PRESETS,
+  DEFAULT_METTLEWAY_CLASS_TIME_24,
+  DEFAULT_METTLEWAY_CLASS_DURATION_MINS,
+  formatTime24To12Hour,
+  buildMettlewayDailyClassCalendarUrl,
+  saveMettlewaySchedule,
 } from '../utils/studyWorkspaceLogic';
 import {
   discoverYouTubePlaylist,
@@ -32,10 +37,12 @@ import {
   PLAYLIST_FALLBACK_MESSAGE,
 } from '../utils/youtubePlaylistDiscovery';
 
+import { soundAlert } from '../utils/audioAlert';
+
 interface CreateTrackerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaveTracker: (newTracker: Tracker) => void;
+  onSaveTracker: (newTracker: Tracker, options?: { openScheduleModal?: boolean }) => void;
 }
 
 const POPULAR_COURSE_TEMPLATES = [
@@ -83,14 +90,15 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
   const [isDetectingUrl, setIsDetectingUrl] = useState(false);
   const [fallbackMode, setFallbackMode] = useState<FallbackImportMode>('direct_playlist');
   const [manualVideoUrlsText, setManualVideoUrlsText] = useState('');
-  const [dailyMinutes, setDailyMinutes] = useState<number>(60);
-  const [scheduledTime, setScheduledTime] = useState<string>('20:00');
+  const [dailyMinutes, setDailyMinutes] = useState<number>(DEFAULT_METTLEWAY_CLASS_DURATION_MINS);
+  const [scheduledTime, setScheduledTime] = useState<string>(DEFAULT_METTLEWAY_CLASS_TIME_24);
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5, 6]); // Mon-Sat
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [importProgressPercent, setImportProgressPercent] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loadingStep, setLoadingStep] = useState<string>('');
+  const [inlineAlarmLocked, setInlineAlarmLocked] = useState<boolean>(false);
 
   const parsedInputSource = React.useMemo(() => parseYouTubeSourceUrl(inputUrl.trim()), [inputUrl]);
 
@@ -252,7 +260,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
 
         setImportProgressPercent(100);
         setSuccessMsg(`Imported ${imported.lessons.length} unique lessons!`);
-        onSaveTracker(manualTracker);
+        onSaveTracker(manualTracker, { openScheduleModal: false });
         resetAndClose();
       } catch (err: any) {
         setErrorMsg(err?.message || 'Failed to import manual video URLs.');
@@ -309,7 +317,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
         });
 
         setImportProgressPercent(100);
-        onSaveTracker(verifiedTracker);
+        onSaveTracker(verifiedTracker, { openScheduleModal: false });
         resetAndClose();
         return;
       } catch (err: any) {
@@ -377,7 +385,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
       });
 
       setImportProgressPercent(100);
-      onSaveTracker(newTracker);
+      onSaveTracker(newTracker, { openScheduleModal: false });
       resetAndClose();
     } catch (err: any) {
       if (parsedInputSource.isYouTube) {
@@ -403,7 +411,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
             studyDays: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5, 6],
             trackerId: uniqueTrackerId,
           });
-          onSaveTracker(tracker);
+          onSaveTracker(tracker, { openScheduleModal: false });
           resetAndClose();
           return;
         }
@@ -420,7 +428,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
         trackerId: uniqueTrackerId,
       });
 
-      onSaveTracker(dynamicTracker);
+      onSaveTracker(dynamicTracker, { openScheduleModal: false });
       resetAndClose();
     } finally {
       setIsLoading(false);
@@ -741,11 +749,87 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
             </div>
           </div>
 
-          {/* Flexible Pacing Presets for Universal Learners */}
-          <div>
-            <span className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Flexible Pacing Preset (After-Office Hours, Weekend Sprint, or Daily):
-            </span>
+          {/* Mettleway. Accountability Section: Lock Your Daily Class Schedule */}
+          <div
+            data-testid="create-modal-lock-schedule-card"
+            className="p-4 rounded-2xl bg-zinc-950 border border-amber-500/40 text-zinc-100 space-y-3.5 shadow-md"
+          >
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-extrabold text-amber-400 tracking-tight">
+                  Lock Your Daily Class Schedule
+                </h3>
+                <span className="text-[11px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-md">
+                  {formatTime24To12Hour(scheduledTime)} · {dailyMinutes} mins
+                </span>
+              </div>
+              <p className="text-xs text-zinc-300 leading-relaxed">
+                YouTube courses fail without discipline. Treat Mettleway. like a live paid course.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Time Selector (Default: 04:00 PM / 16:00) */}
+              <div>
+                <label className="block text-[11px] font-bold text-zinc-300 mb-1 flex items-center justify-between">
+                  <span>Daily Class Time</span>
+                  <span className="font-mono text-amber-400">
+                    {formatTime24To12Hour(scheduledTime)}
+                  </span>
+                </label>
+                <input
+                  type="time"
+                  value={scheduledTime}
+                  onChange={e => {
+                    const nextTime = e.target.value;
+                    setScheduledTime(nextTime);
+                    saveMettlewaySchedule({
+                      scheduledTime24: nextTime,
+                      durationMinutes: dailyMinutes,
+                      courseName:
+                        courseTopic.trim() ||
+                        selectedCandidate?.title ||
+                        "Striver's A2Z DSA Master Path",
+                    });
+                  }}
+                  className="w-full text-xs p-2.5 bg-zinc-900 border border-zinc-700 text-white rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono font-bold"
+                  disabled={isLoading}
+                />
+              </div>
+
+              {/* Duration Selector (Default: 60 mins) */}
+              <div>
+                <label className="block text-[11px] font-bold text-zinc-300 mb-1 flex items-center justify-between">
+                  <span>Class Duration</span>
+                  <span className="font-mono text-amber-400">{dailyMinutes} mins</span>
+                </label>
+                <select
+                  value={dailyMinutes}
+                  onChange={e => {
+                    const nextMins = parseInt(e.target.value, 10);
+                    setDailyMinutes(nextMins);
+                    saveMettlewaySchedule({
+                      scheduledTime24: scheduledTime,
+                      durationMinutes: nextMins,
+                      courseName:
+                        courseTopic.trim() ||
+                        selectedCandidate?.title ||
+                        "Striver's A2Z DSA Master Path",
+                    });
+                  }}
+                  className="w-full text-xs p-2.5 bg-zinc-900 border border-zinc-700 text-white rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none font-bold cursor-pointer"
+                  disabled={isLoading}
+                >
+                  <option value={30}>30 mins (After-Work Sprint)</option>
+                  <option value={45}>45 mins (Focused Session)</option>
+                  <option value={60}>60 mins (Default Live Class)</option>
+                  <option value={90}>90 mins (Deep Practice)</option>
+                  <option value={120}>120 mins (2-Hour Bootcamp)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Flexible Pacing Presets */}
             <div className="flex flex-wrap gap-1.5">
               {PACING_PRESETS.map(preset => (
                 <button
@@ -755,57 +839,53 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
                     setDailyMinutes(preset.dailyMinutesTarget);
                     setScheduledTime(preset.preferredTime);
                     setSelectedDays([...preset.studyDays]);
+                    saveMettlewaySchedule({
+                      scheduledTime24: preset.preferredTime,
+                      durationMinutes: preset.dailyMinutesTarget,
+                    });
                   }}
-                  className="px-2.5 py-1 text-xs border border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 rounded-lg text-slate-700 transition-colors cursor-pointer"
+                  className="px-2.5 py-1 text-[11px] border border-zinc-700 bg-zinc-900 hover:border-amber-500/60 hover:text-amber-300 rounded-lg text-zinc-300 transition-colors cursor-pointer"
                 >
                   {preset.label} ({preset.dailyMinutesTarget}m)
                 </button>
               ))}
             </div>
-          </div>
 
-          {/* Daily Commitment Slider */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-slate-400" />
-                <span>Daily Study Time Commitment</span>
-              </label>
-              <span className="text-xs font-bold font-mono tabular-nums text-indigo-600">
-                {dailyMinutes} Minutes / day
+            {/* Smooth In-App Alarm Lock Button (Does not relocate user away from modal) */}
+            <button
+              type="button"
+              data-calendar-url={buildMettlewayDailyClassCalendarUrl({
+                courseName:
+                  courseTopic.trim() ||
+                  selectedCandidate?.title ||
+                  "Striver's A2Z DSA Master Path",
+                scheduledTime24: scheduledTime,
+                durationMinutes: dailyMinutes,
+              })}
+              onClick={() => {
+                soundAlert.playSessionAlertChime();
+                soundAlert.requestNotificationPermission().catch(() => {});
+                saveMettlewaySchedule({
+                  scheduledTime24: scheduledTime,
+                  durationMinutes: dailyMinutes,
+                  courseName:
+                    courseTopic.trim() ||
+                    selectedCandidate?.title ||
+                    "Striver's A2Z DSA Master Path",
+                });
+                setInlineAlarmLocked(true);
+              }}
+              className="w-full py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-extrabold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer text-center shadow-sm"
+            >
+              <span>
+                {inlineAlarmLocked
+                  ? `✓ Daily Class Alarm Locked for ${formatTime24To12Hour(scheduledTime)} (${dailyMinutes}m)`
+                  : '📅 Sync Daily Class to Google Calendar (Set Phone Alarms)'}
               </span>
-            </div>
-            <input
-              type="range"
-              min={30}
-              max={150}
-              step={15}
-              value={dailyMinutes}
-              onChange={e => setDailyMinutes(parseInt(e.target.value, 10))}
-              className="w-full accent-indigo-600 cursor-pointer"
-              disabled={isLoading}
-            />
-            <div className="flex justify-between text-xs text-slate-400 mt-1 font-mono">
-              <span>30m (After-Work)</span>
-              <span>60m (Standard)</span>
-              <span>120m+ (Weekend/Sprint)</span>
-            </div>
-          </div>
+            </button>
 
-          {/* Scheduled Timing Picker */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              When are you free to study daily? (Session Alert Time)
-            </label>
-            <input
-              type="time"
-              value={scheduledTime}
-              onChange={e => setScheduledTime(e.target.value)}
-              className="text-xs p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none font-mono"
-              disabled={isLoading}
-            />
-            <span className="text-xs text-slate-500 ml-2">
-              (DevTrack will chime and alert you at this exact time)
+            <span className="text-[11px] text-zinc-400 block">
+              (Mettleway. will chime and alert you at {formatTime24To12Hour(scheduledTime)} daily)
             </span>
           </div>
 

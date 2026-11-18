@@ -5240,3 +5240,271 @@ Return ONLY valid JSON matching this exact structure:
 }`;
 }
 
+// ============================================================================
+// 13. METTLEWAY. DAILY CLASS SCHEDULE, GOOGLE CALENDAR RRULE SYNC & ATTENDANCE VERIFICATION
+// ============================================================================
+
+export const METTLEWAY_BRAND_NAME = 'Mettleway.';
+export const METTLEWAY_SCHEDULE_STORAGE_KEY = 'mettleway_schedule';
+export const DEFAULT_METTLEWAY_CLASS_TIME_24 = '16:00';
+export const DEFAULT_METTLEWAY_CLASS_DURATION_MINS = 60;
+
+export interface MettlewayScheduleData {
+  scheduledTime24: string; // e.g. "16:00"
+  formattedTime12: string; // e.g. "04:00 PM"
+  durationMinutes: number; // default: 60
+  courseName: string;
+  streakDays: number;
+  xpEarned: number;
+  attendanceVerifiedToday: boolean;
+  lastVerifiedDate?: string;
+  updatedAt: string;
+}
+
+/**
+ * Converts 24-hour time string ("16:00", "04:05", "00:30", "12:15") into 12-hour format ("04:00 PM").
+ */
+export function formatTime24To12Hour(time24?: string): string {
+  const clean = (time24 || DEFAULT_METTLEWAY_CLASS_TIME_24).trim();
+  const match = clean.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return '04:00 PM';
+  }
+  const rawHours = Math.max(0, Math.min(23, parseInt(match[1], 10)));
+  const rawMins = Math.max(0, Math.min(59, parseInt(match[2], 10)));
+  const period = rawHours >= 12 ? 'PM' : 'AM';
+  const hour12 = rawHours % 12 === 0 ? 12 : rawHours % 12;
+  const pad2 = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  return `${pad2(hour12)}:${pad2(rawMins)} ${period}`;
+}
+
+/**
+ * Formats the Mettleway. dashboard header status badge:
+ * "⚡ Daily Class: 04:00 PM | Attendance Streak"
+ */
+export function formatMettlewayDailyClassBadge(scheduledTime24Or12?: string): string {
+  const isAlready12h =
+    scheduledTime24Or12 &&
+    /\b(AM|PM)\b/i.test(scheduledTime24Or12.trim());
+  const time12 = isAlready12h
+    ? scheduledTime24Or12!.trim().toUpperCase()
+    : formatTime24To12Hour(scheduledTime24Or12 || DEFAULT_METTLEWAY_CLASS_TIME_24);
+  return `⚡ Daily Class: ${time12} | Attendance Streak`;
+}
+
+/**
+ * Checks whether the learner opened the lecture within `windowMinutes` (default 30 minutes)
+ * of their scheduled daily class time (`scheduledTime24`).
+ */
+export function isWithinScheduledClassWindow(
+  scheduledTime24: string,
+  nowDate: Date = new Date(),
+  windowMinutes: number = 30
+): boolean {
+  const clean = (scheduledTime24 || DEFAULT_METTLEWAY_CLASS_TIME_24).trim();
+  const match = clean.match(/^(\d{1,2}):(\d{2})$/);
+  const schedHour = match ? Math.max(0, Math.min(23, parseInt(match[1], 10))) : 16;
+  const schedMin = match ? Math.max(0, Math.min(59, parseInt(match[2], 10))) : 0;
+
+  const schedTotalMinutes = schedHour * 60 + schedMin;
+  const nowTotalMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
+
+  const directDiff = Math.abs(nowTotalMinutes - schedTotalMinutes);
+  const wrapAroundDiff = 1440 - directDiff;
+  const minDiffMinutes = Math.min(directDiff, wrapAroundDiff);
+
+  return minDiffMinutes <= Math.max(1, windowMinutes);
+}
+
+/**
+ * Generates a recurring Google Calendar template link for Mettleway. Live Class:
+ * - Title: "🔴 Mettleway. Live Class: [Course Name]"
+ * - Details: "Your daily class is starting now! Keep your streak alive on Mettleway.\n\nJoin Session: [Current URL]"
+ * - Recurrence: "RRULE:FREQ=DAILY"
+ */
+export function buildMettlewayDailyClassCalendarUrl(params: {
+  courseName: string;
+  scheduledTime24?: string;
+  durationMinutes?: number;
+  joinUrl?: string;
+  referenceDate?: Date;
+}): string {
+  const cleanCourseName = (params.courseName || 'Software Engineering Track').trim();
+  const time24 = (params.scheduledTime24 || DEFAULT_METTLEWAY_CLASS_TIME_24).trim();
+  const duration = Math.max(15, Math.min(360, Number(params.durationMinutes) || DEFAULT_METTLEWAY_CLASS_DURATION_MINS));
+  const joinUrl =
+    (params.joinUrl || '').trim() ||
+    (typeof window !== 'undefined' && window.location?.href
+      ? window.location.href
+      : 'https://mettleway.app/');
+
+  const match = time24.match(/^(\d{1,2}):(\d{2})$/);
+  const startH = match ? Math.max(0, Math.min(23, parseInt(match[1], 10))) : 16;
+  const startM = match ? Math.max(0, Math.min(59, parseInt(match[2], 10))) : 0;
+
+  const baseDate = params.referenceDate ? new Date(params.referenceDate) : new Date();
+  const startDate = new Date(baseDate);
+  startDate.setHours(startH, startM, 0, 0);
+
+  const endDate = new Date(startDate.getTime() + duration * 60_000);
+
+  const pad2 = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  const formatCalDate = (d: Date) =>
+    `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}T${pad2(d.getHours())}${pad2(d.getMinutes())}00`;
+
+  const title = `🔴 Mettleway. Live Class: ${cleanCourseName}`;
+  const details = `Your daily class is starting now! Keep your streak alive on Mettleway.\n\nJoin Session: ${joinUrl}`;
+  const recurrence = 'RRULE:FREQ=DAILY';
+
+  const searchParams = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: title,
+    dates: `${formatCalDate(startDate)}/${formatCalDate(endDate)}`,
+    details,
+    recur: recurrence,
+  });
+
+  return `https://calendar.google.com/calendar/render?${searchParams.toString()}`;
+}
+
+/**
+ * Loads the persisted Mettleway. daily schedule and attendance streak data from `localStorage`
+ * under the exact key `mettleway_schedule`.
+ */
+export function loadMettlewaySchedule(
+  defaultStreakDays: number = 4,
+  defaultCourseName: string = "Striver's A2Z DSA Master Path",
+  nowDate: Date = new Date()
+): MettlewayScheduleData {
+  const defaultTime24 = DEFAULT_METTLEWAY_CLASS_TIME_24;
+  const todayStr = nowDate.toISOString().slice(0, 10);
+
+  const fallback: MettlewayScheduleData = {
+    scheduledTime24: defaultTime24,
+    formattedTime12: formatTime24To12Hour(defaultTime24),
+    durationMinutes: DEFAULT_METTLEWAY_CLASS_DURATION_MINS,
+    courseName: defaultCourseName,
+    streakDays: defaultStreakDays,
+    xpEarned: 200,
+    attendanceVerifiedToday: isWithinScheduledClassWindow(defaultTime24, nowDate, 30),
+    lastVerifiedDate: isWithinScheduledClassWindow(defaultTime24, nowDate, 30) ? todayStr : undefined,
+    updatedAt: nowDate.toISOString(),
+  };
+
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+
+  try {
+    const raw = localStorage.getItem(METTLEWAY_SCHEDULE_STORAGE_KEY);
+    if (!raw) {
+      localStorage.setItem(METTLEWAY_SCHEDULE_STORAGE_KEY, JSON.stringify(fallback));
+      return fallback;
+    }
+    const parsed = JSON.parse(raw);
+    const time24 =
+      typeof parsed?.scheduledTime24 === 'string' && /^\d{1,2}:\d{2}$/.test(parsed.scheduledTime24)
+        ? parsed.scheduledTime24
+        : defaultTime24;
+    const withinWindow = isWithinScheduledClassWindow(time24, nowDate, 30);
+    const alreadyVerifiedToday =
+      Boolean(parsed?.attendanceVerifiedToday) && parsed?.lastVerifiedDate === todayStr;
+    const verifiedNow = withinWindow || alreadyVerifiedToday;
+
+    const merged: MettlewayScheduleData = {
+      scheduledTime24: time24,
+      formattedTime12: formatTime24To12Hour(time24),
+      durationMinutes: Number(parsed?.durationMinutes) || DEFAULT_METTLEWAY_CLASS_DURATION_MINS,
+      courseName: String(parsed?.courseName || defaultCourseName),
+      streakDays:
+        typeof parsed?.streakDays === 'number' && Number.isFinite(parsed.streakDays)
+          ? parsed.streakDays
+          : defaultStreakDays,
+      xpEarned:
+        typeof parsed?.xpEarned === 'number' && Number.isFinite(parsed.xpEarned)
+          ? parsed.xpEarned + (withinWindow && !alreadyVerifiedToday ? 50 : 0)
+          : verifiedNow
+          ? 250
+          : 200,
+      attendanceVerifiedToday: verifiedNow,
+      lastVerifiedDate: verifiedNow ? todayStr : parsed?.lastVerifiedDate,
+      updatedAt: parsed?.updatedAt || nowDate.toISOString(),
+    };
+    return merged;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Saves the Mettleway. daily schedule and streak data to `localStorage` under `mettleway_schedule`.
+ */
+export function saveMettlewaySchedule(
+  partial: Partial<MettlewayScheduleData>,
+  nowDate: Date = new Date()
+): MettlewayScheduleData {
+  const existing = loadMettlewaySchedule(
+    partial.streakDays ?? 4,
+    partial.courseName ?? "Striver's A2Z DSA Master Path",
+    nowDate
+  );
+  const nextTime24 = partial.scheduledTime24 || existing.scheduledTime24 || DEFAULT_METTLEWAY_CLASS_TIME_24;
+  const todayStr = nowDate.toISOString().slice(0, 10);
+  const withinWindow = isWithinScheduledClassWindow(nextTime24, nowDate, 30);
+  const verified =
+    partial.attendanceVerifiedToday !== undefined
+      ? partial.attendanceVerifiedToday
+      : withinWindow || (existing.attendanceVerifiedToday && existing.lastVerifiedDate === todayStr);
+
+  const updated: MettlewayScheduleData = {
+    ...existing,
+    ...partial,
+    scheduledTime24: nextTime24,
+    formattedTime12: formatTime24To12Hour(nextTime24),
+    durationMinutes:
+      partial.durationMinutes !== undefined
+        ? Math.max(15, Math.min(360, Number(partial.durationMinutes) || 60))
+        : existing.durationMinutes,
+    attendanceVerifiedToday: verified,
+    lastVerifiedDate: verified ? todayStr : existing.lastVerifiedDate,
+    xpEarned:
+      partial.xpEarned !== undefined
+        ? partial.xpEarned
+        : verified && existing.lastVerifiedDate !== todayStr
+        ? existing.xpEarned + 50
+        : existing.xpEarned,
+    updatedAt: nowDate.toISOString(),
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(METTLEWAY_SCHEDULE_STORAGE_KEY, JSON.stringify(updated));
+    } catch {}
+  }
+
+  return updated;
+}
+
+/**
+ * Locks the Mettleway. daily class alarm in-app without relocating the user away from the platform,
+ * returning the persisted schedule, a confirmation toast message, and instructions to auto-close
+ * any open alarm modal/settings view and return directly to the active learning workspace (`today`).
+ */
+export function confirmAndLockMettlewayAlarm(
+  partial: Partial<MettlewayScheduleData>,
+  nowDate: Date = new Date()
+): {
+  schedule: MettlewayScheduleData;
+  toastMessage: string;
+  shouldCloseModal: boolean;
+  returnTab: NavTab;
+} {
+  const schedule = saveMettlewaySchedule(partial, nowDate);
+  const toastMessage = `⚡ Daily Class Alarm locked for ${schedule.formattedTime12} (${schedule.durationMinutes} mins) — active on Mettleway.!`;
+  return {
+    schedule,
+    toastMessage,
+    shouldCloseModal: true,
+    returnTab: 'today',
+  };
+}

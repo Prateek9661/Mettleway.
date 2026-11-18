@@ -30,14 +30,23 @@ import {
   ScheduledSessionEvent
 } from '../utils/calendarExport';
 
+import { formatTime24To12Hour } from '../utils/studyWorkspaceLogic';
+
 interface ScheduleAlertsViewProps {
   tracker: Tracker;
-  onUpdateSchedule: (newTime: string, newDuration: number, newDays: number[]) => void;
+  onUpdateSchedule: (
+    newTime: string,
+    newDuration: number,
+    newDays: number[],
+    options?: { returnToPlatform?: boolean; toastMessage?: string }
+  ) => void;
+  onReturnToPlatform?: () => void;
 }
 
 export const ScheduleAlertsView: React.FC<ScheduleAlertsViewProps> = ({
   tracker,
   onUpdateSchedule,
+  onReturnToPlatform,
 }) => {
   const [scheduledTime, setScheduledTime] = useState<string>(tracker.scheduledTime);
   const [dailyDuration, setDailyDuration] = useState<number>(tracker.dailyMinutesTarget);
@@ -85,9 +94,13 @@ export const ScheduleAlertsView: React.FC<ScheduleAlertsViewProps> = ({
 
   const handleSaveSchedule = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateSchedule(scheduledTime, dailyDuration, studyDays);
-    setToastNotice('Study schedule and alert time updated!');
-    setTimeout(() => setToastNotice(null), 3000);
+    soundAlert.playSessionAlertChime();
+    const formatted12 = formatTime24To12Hour(scheduledTime);
+    const toastMsg = `⚡ Daily Class Alarm locked for ${formatted12} (${dailyDuration} mins) — returned to your active course!`;
+    onUpdateSchedule(scheduledTime, dailyDuration, studyDays, {
+      returnToPlatform: true,
+      toastMessage: toastMsg,
+    });
   };
 
   const handleTestChime = () => {
@@ -97,17 +110,19 @@ export const ScheduleAlertsView: React.FC<ScheduleAlertsViewProps> = ({
   };
 
   const handleRequestNotifications = async () => {
+    soundAlert.playSessionAlertChime();
     const granted = await soundAlert.requestNotificationPermission();
     setNotificationStatus(granted ? 'granted' : 'denied');
+    const formatted12 = formatTime24To12Hour(scheduledTime);
     if (granted) {
-      soundAlert.fireNotification('DevTrack Alerts Enabled', {
-        body: `You will now receive desktop alerts at ${scheduledTime} on your study days.`,
+      soundAlert.fireNotification('Mettleway. Alerts Enabled', {
+        body: `You will now receive desktop alerts at ${formatted12} on your study days.`,
       });
-      setToastNotice('Desktop push notifications enabled!');
-    } else {
-      setToastNotice('Notification permission was not granted by your browser.');
     }
-    setTimeout(() => setToastNotice(null), 3500);
+    onUpdateSchedule(scheduledTime, dailyDuration, studyDays, {
+      returnToPlatform: true,
+      toastMessage: `⚡ Alarm Notification enabled for ${formatted12} (${dailyDuration} mins) — returned to your learning workspace!`,
+    });
   };
 
   // Main Export Handler
@@ -152,18 +167,30 @@ export const ScheduleAlertsView: React.FC<ScheduleAlertsViewProps> = ({
         </div>
       )}
 
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold mb-1">
-          <Bell className="w-4 h-4" />
-          <span>Scheduled Alarms & Calendar Synchronization</span>
+      {/* Header with 1-Click Return to Platform Button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs text-amber-600 font-bold mb-1">
+            <Bell className="w-4 h-4" />
+            <span>Mettleway. Scheduled Alarms &amp; Calendar Synchronization</span>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            Personalized Timetable &amp; Alarm Settings
+          </h1>
+          <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+            Set your daily study alarm time below. Saving your alarm automatically returns you directly to your active learning workspace.
+          </p>
         </div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-          Personalized Timetable & Calendar Export
-        </h1>
-        <p className="text-xs text-slate-600 mt-1 max-w-2xl">
-          Set your study hours, trigger audio alerts, and export your specific curriculum sessions directly to Google Calendar or Microsoft Outlook with custom reminders.
-        </p>
+        {onReturnToPlatform && (
+          <button
+            type="button"
+            data-testid="schedule-back-to-platform-btn"
+            onClick={onReturnToPlatform}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-extrabold text-zinc-950 bg-amber-500 hover:bg-amber-400 rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 shadow-xs"
+          >
+            <span>&larr; Back to Learning Workspace</span>
+          </button>
+        )}
       </div>
 
       {/* Main Grid: Settings & Alert Controls + Weekly Timetable */}
@@ -241,9 +268,10 @@ export const ScheduleAlertsView: React.FC<ScheduleAlertsViewProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl transition-colors shadow-sm cursor-pointer"
+                data-testid="save-schedule-return-btn"
+                className="w-full py-3 px-4 bg-zinc-950 hover:bg-zinc-900 border border-amber-500/50 text-amber-400 text-xs font-extrabold rounded-xl transition-colors shadow-sm cursor-pointer"
               >
-                Save Schedule Changes
+                ⚡ Save Alarm &amp; Return to Learning Workspace
               </button>
             </form>
           </div>

@@ -416,7 +416,7 @@ export const StudySquadsView: React.FC<StudySquadsViewProps> = ({
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
                 <div className="flex items-center justify-between text-slate-500">
-                  <span className="font-semibold text-slate-800">DevTrack Bot</span>
+                  <span className="font-semibold text-slate-800">Mettleway. Bot</span>
                   <span className="font-mono">Today</span>
                 </div>
                 <p className="text-slate-600">

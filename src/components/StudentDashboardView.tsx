@@ -31,6 +31,9 @@ import {
   computePersonalizedCourseRecommendations,
   computeLearnerNextStepRecommendation,
   computeLearnerAchievements,
+  MettlewayScheduleData,
+  formatMettlewayDailyClassBadge,
+  isWithinScheduledClassWindow,
 } from '../utils/studyWorkspaceLogic';
 
 interface StudentDashboardViewProps {
@@ -48,6 +51,8 @@ interface StudentDashboardViewProps {
   onOpenNotesLibrary?: () => void;
   onOpenMyProfile?: () => void;
   onOpenOnboardingWizard?: (mode: 'register' | 'onboarding') => void;
+  mettlewaySchedule?: MettlewayScheduleData;
+  onOpenLockScheduleModal?: () => void;
 }
 
 export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
@@ -65,6 +70,8 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   onOpenNotesLibrary,
   onOpenMyProfile,
   onOpenOnboardingWizard,
+  mettlewaySchedule,
+  onOpenLockScheduleModal,
 }) => {
   const [quickLogMinutes, setQuickLogMinutes] = useState<number>(30);
   const [activityFeedback, setActivityFeedback] = useState<string | null>(null);
@@ -143,22 +150,41 @@ export const StudentDashboardView: React.FC<StudentDashboardViewProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Top Student Dashboard Header */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        <div className="space-y-1.5 max-w-2xl">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span className="font-semibold text-indigo-600">{learnerProfile.role}</span>
+      <div className="bg-zinc-950 border border-amber-500/30 rounded-2xl p-6 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-6 text-zinc-100">
+        <div className="space-y-2 max-w-2xl">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+            <span className="font-bold text-amber-400">{learnerProfile.role}</span>
             <span aria-hidden="true">·</span>
             <span>{learnerProfile.name}</span>
             <span aria-hidden="true">·</span>
-            <span className="font-mono tabular-nums">
+            <span className="font-mono tabular-nums text-zinc-300">
               Target: {learnerProfile.dailyMinutesTarget}m/day ({learnerProfile.weeklyHoursGoal}h/wk)
             </span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Student Learning Dashboard
-          </h1>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Track your enrolled courses, completed and pending lessons, weekly learning activity, and resume directly from your last watched lecture.
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-extrabold tracking-tight text-white">
+              Mettleway<span className="text-amber-500">.</span> Student Learning Dashboard
+            </h1>
+            {mettlewaySchedule && (
+              <button
+                type="button"
+                onClick={onOpenLockScheduleModal}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-zinc-900 border border-amber-500/40 text-amber-400 text-xs font-bold hover:border-amber-400 transition-colors cursor-pointer"
+              >
+                <span>{formatMettlewayDailyClassBadge(mettlewaySchedule.scheduledTime24)}</span>
+              </button>
+            )}
+            {mettlewaySchedule &&
+              (isWithinScheduledClassWindow(mettlewaySchedule.scheduledTime24, new Date(), 30) ||
+                mettlewaySchedule.attendanceVerifiedToday) && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 text-zinc-950 text-xs font-extrabold">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-zinc-950" />
+                  <span>Attendance Verified (+50 XP)</span>
+                </span>
+              )}
+          </div>
+          <p className="text-xs text-zinc-400 leading-relaxed">
+            Track your enrolled courses, completed and pending lessons, weekly learning activity, and resume directly from your last watched lecture on Mettleway.
           </p>
         </div>
 
