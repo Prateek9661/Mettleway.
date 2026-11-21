@@ -12,7 +12,7 @@
 [![Gemini API](https://img.shields.io/badge/Google_Gemini_API-@google/genai-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
 [![Tests](https://img.shields.io/badge/Tests-28%2F28_Passing-22C55E?style=for-the-badge&logo=nodejs&logoColor=white)](#testing--tdd-suite)
 
-[🌐 **View Live Demo**](https://devtrack.ukprateek9661.workers.dev) · [✨ **Key Features**](#-key-features) · [🛠️ **Tech Stack**](#️-tech-stack) · [⚡ **Local Setup**](#-local-setup--installation) · [📸 **Screenshots**](#-screenshots)
+[🌐 **View Live Demo**](https://mettleway.pks-hq.workers.dev/) · [✨ **Key Features**](#-key-features) · [🛠️ **Tech Stack**](#️-tech-stack) · [⚡ **Local Setup**](#-local-setup--installation) · [📸 **Screenshots**](#-screenshots)
 
 </div>
 
@@ -20,7 +20,7 @@
 
 ## 📖 Overview
 
-**DevTrack (`DevTrack - Dev Track App`)** is a full-stack developer learning platform and daily study task tracker built for students, self-taught engineers, and interview candidates mastering **Data Structures & Algorithms (DSA)**, **DBMS & SQL**, **Operating Systems**, **Computer Networks**, **Full-Stack Web Development**, **Python**, and **System Design**.
+**Mettleway. (`Mettleway-learner App`)** is a full-stack developer learning platform and daily study task tracker built for students, self-taught engineers, and interview candidates mastering **Data Structures & Algorithms (DSA)**, **DBMS & SQL**, **Operating Systems**, **Computer Networks**, **Full-Stack Web Development**, **Python**, and **System Design**.
 
 While platforms like YouTube offer world-class engineering playlists, learners often struggle with **unstructured binge-watching**, **lack of daily task tracking**, and **getting stuck on complex concepts without a mentor**. DevTrack solves this by transforming any YouTube playlist or course topic into a structured day-by-day curriculum with direct lecture navigation, a distraction-free **Deep Work** focus timer, a dual-mode **AI Concept Mentor** (*Professor Mode* & *Technical Interviewer Mode*), peer **Study Squads**, and **RFC 5545 `.ics` Calendar Synchronization**.
 
@@ -28,7 +28,7 @@ While platforms like YouTube offer world-class engineering playlists, learners o
 
 ## 🌐 Live Demo
 
-🔗 **Live Application:** [**https://devtrack.ukprateek9661.workers.dev**](https://devtrack.ukprateek9661.workers.dev)
+🔗 **Live Application:** [**https://mettleway.pks-hq.workers.dev/**](https://mettleway.pks-hq.workers.dev/)
 
 ---
 
@@ -127,12 +127,12 @@ devtrack/
 
 ## ⚡ Local Setup & Installation
 
-Follow these steps to run **DevTrack** locally on your machine:
+Follow these steps to run **Mettleway.** locally on your machine:
 
 ### Prerequisites
 - **Node.js** `v18.18+` or `v20+`
 - **npm** `v9+`
-- A **Google Gemini API Key** ([Get a free key from Google AI Studio](https://aistudio.google.com/))
+- A **Google Gemini API Key** 
 
 ### 1. Clone the Repository
 ```bash
