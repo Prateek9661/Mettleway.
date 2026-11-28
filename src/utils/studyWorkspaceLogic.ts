@@ -5508,3 +5508,14 @@ export function confirmAndLockMettlewayAlarm(
     returnTab: 'today',
   };
 }
+
+export const METTLEWAY_FEEDBACK_EMAIL = 'YOUR_EMAIL@gmail.com';
+
+export function buildMettlewayFeedbackMailtoUrl(
+  email: string = METTLEWAY_FEEDBACK_EMAIL,
+  subject: string = 'Mettleway. Learner Suggestion'
+): string {
+  const cleanEmail = (email || METTLEWAY_FEEDBACK_EMAIL).trim();
+  return `mailto:${cleanEmail}?subject=${encodeURIComponent(subject)}`;
+}
+

@@ -260,7 +260,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
 
         setImportProgressPercent(100);
         setSuccessMsg(`Imported ${imported.lessons.length} unique lessons!`);
-        onSaveTracker(manualTracker, { openScheduleModal: false });
+        onSaveTracker(manualTracker, { openScheduleModal: true });
         resetAndClose();
       } catch (err: any) {
         setErrorMsg(err?.message || 'Failed to import manual video URLs.');
@@ -317,7 +317,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
         });
 
         setImportProgressPercent(100);
-        onSaveTracker(verifiedTracker, { openScheduleModal: false });
+        onSaveTracker(verifiedTracker, { openScheduleModal: true });
         resetAndClose();
         return;
       } catch (err: any) {
@@ -385,7 +385,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
       });
 
       setImportProgressPercent(100);
-      onSaveTracker(newTracker, { openScheduleModal: false });
+      onSaveTracker(newTracker, { openScheduleModal: true });
       resetAndClose();
     } catch (err: any) {
       if (parsedInputSource.isYouTube) {
@@ -411,7 +411,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
             studyDays: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5, 6],
             trackerId: uniqueTrackerId,
           });
-          onSaveTracker(tracker, { openScheduleModal: false });
+          onSaveTracker(tracker, { openScheduleModal: true });
           resetAndClose();
           return;
         }
@@ -428,7 +428,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
         trackerId: uniqueTrackerId,
       });
 
-      onSaveTracker(dynamicTracker, { openScheduleModal: false });
+      onSaveTracker(dynamicTracker, { openScheduleModal: true });
       resetAndClose();
     } finally {
       setIsLoading(false);
@@ -851,10 +851,9 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
               ))}
             </div>
 
-            {/* Smooth In-App Alarm Lock Button (Does not relocate user away from modal) */}
-            <button
-              type="button"
-              data-calendar-url={buildMettlewayDailyClassCalendarUrl({
+            {/* Direct Google Calendar Sync Link (Opens in New Tab & Saves Schedule) */}
+            <a
+              href={buildMettlewayDailyClassCalendarUrl({
                 courseName:
                   courseTopic.trim() ||
                   selectedCandidate?.title ||
@@ -862,9 +861,10 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
                 scheduledTime24: scheduledTime,
                 durationMinutes: dailyMinutes,
               })}
+              target="_blank"
+              rel="noopener noreferrer"
               onClick={() => {
                 soundAlert.playSessionAlertChime();
-                soundAlert.requestNotificationPermission().catch(() => {});
                 saveMettlewaySchedule({
                   scheduledTime24: scheduledTime,
                   durationMinutes: dailyMinutes,
@@ -879,13 +879,13 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
             >
               <span>
                 {inlineAlarmLocked
-                  ? `✓ Daily Class Alarm Locked for ${formatTime24To12Hour(scheduledTime)} (${dailyMinutes}m)`
+                  ? `✓ Synced to Google Calendar for ${formatTime24To12Hour(scheduledTime)} (${dailyMinutes}m)`
                   : '📅 Sync Daily Class to Google Calendar (Set Phone Alarms)'}
               </span>
-            </button>
+            </a>
 
             <span className="text-[11px] text-zinc-400 block">
-              (Mettleway. will chime and alert you at {formatTime24To12Hour(scheduledTime)} daily)
+              (Opens Google Calendar with daily phone alarms at {formatTime24To12Hour(scheduledTime)})
             </span>
           </div>
 

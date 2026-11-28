@@ -87,6 +87,8 @@ import {
   isWithinScheduledClassWindow,
   buildMettlewayDailyClassCalendarUrl,
   confirmAndLockMettlewayAlarm,
+  METTLEWAY_FEEDBACK_EMAIL,
+  buildMettlewayFeedbackMailtoUrl,
 } from './studyWorkspaceLogic';
 import {
   calculateUpcomingSessions,
@@ -281,22 +283,22 @@ describe('Unit Tests: AI Concept & Technical Mentor Fallback Engine (TDD)', () =
 });
 
 describe('Unit Tests: SEO Metadata, Visible H1, robots.txt, and sitemap.xml (TDD)', () => {
-  test('index.html contains full SEO metadata targeting "DevTrack - Dev Track App", Open Graph tags, JSON-LD, and visible H1 with "DevTrack"', () => {
+  test('index.html contains full SEO metadata targeting "Mettleway.", Open Graph tags, JSON-LD, and visible H1 with "Mettleway."', () => {
     const htmlPath = path.resolve(process.cwd(), 'index.html');
     const html = fs.readFileSync(htmlPath, 'utf-8');
 
     // Target keyword in title and meta description
-    assert.match(html, /<title>.*DevTrack - Dev Track App.*<\/title>/i);
-    assert.match(html, /<meta\s+name="description"\s+content="[^"]*DevTrack - Dev Track App[^"]*"/i);
-    assert.match(html, /<meta\s+name="keywords"\s+content="[^"]*DevTrack - Dev Track App[^"]*"/i);
+    assert.match(html, /<title>.*Mettleway\..*<\/title>/i);
+    assert.match(html, /<meta\s+name="description"\s+content="[^"]*Mettleway\.[^"]*"/i);
+    assert.match(html, /<meta\s+name="keywords"\s+content="[^"]*Mettleway\.[^"]*"/i);
 
     // Open Graph & Twitter tags
-    assert.match(html, /<meta\s+property="og:title"\s+content="[^"]*DevTrack - Dev Track App[^"]*"/i);
-    assert.match(html, /<meta\s+property="og:description"\s+content="[^"]*DevTrack - Dev Track App[^"]*"/i);
+    assert.match(html, /<meta\s+property="og:title"\s+content="[^"]*Mettleway\.[^"]*"/i);
+    assert.match(html, /<meta\s+property="og:description"\s+content="[^"]*Mettleway\.[^"]*"/i);
     assert.match(html, /<meta\s+property="og:type"\s+content="website"/i);
-    assert.match(html, /<meta\s+property="og:site_name"\s+content="DevTrack - Dev Track App"/i);
+    assert.match(html, /<meta\s+property="og:site_name"\s+content="[^"]*Mettleway\.[^"]*"/i);
     assert.match(html, /<meta\s+name="twitter:card"\s+content="summary_large_image"/i);
-    assert.match(html, /<meta\s+name="twitter:title"\s+content="[^"]*DevTrack - Dev Track App[^"]*"/i);
+    assert.match(html, /<meta\s+name="twitter:title"\s+content="[^"]*Mettleway\.[^"]*"/i);
 
     // Schema.org JSON-LD WebApplication
     assert.match(html, /<script\s+type="application\/ld\+json">/i);
@@ -307,8 +309,8 @@ describe('Unit Tests: SEO Metadata, Visible H1, robots.txt, and sitemap.xml (TDD
       html.includes('<meta name="google-site-verification" content="0X0iN0C9MXiS0_ZLInyDcriTOEsujydnaBL18vhttGo" />')
     );
 
-    // Visible H1 heading containing 'DevTrack'
-    assert.match(html, /<h1[^>]*>[\s\S]*?DevTrack[\s\S]*?<\/h1>/i);
+    // Visible H1 heading containing 'Mettleway.'
+    assert.match(html, /<h1[^>]*>[\s\S]*?Mettleway\.[\s\S]*?<\/h1>/i);
   });
 
   test('public/robots.txt exists and allows crawlers with Sitemap reference', () => {
@@ -1860,6 +1862,13 @@ describe('Unit Tests: Student Onboarding, Personalized Profile & Course-Based Pe
     assert.equal(confirmed.schedule.attendanceVerifiedToday, true);
     assert.ok(confirmed.toastMessage.includes('05:30 PM'));
     assert.ok(confirmed.toastMessage.includes('Mettleway.'));
+
+    // 5. About Mettleway. feedback email & mailto helper
+    assert.equal(METTLEWAY_FEEDBACK_EMAIL, 'YOUR_EMAIL@gmail.com');
+    assert.equal(
+      buildMettlewayFeedbackMailtoUrl(),
+      'mailto:YOUR_EMAIL@gmail.com?subject=Mettleway.%20Learner%20Suggestion'
+    );
   });
 });
 

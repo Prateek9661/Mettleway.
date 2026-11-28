@@ -9,6 +9,7 @@ interface NavbarProps {
   isMuted: boolean;
   toggleMute: () => void;
   onOpenCreateModal: () => void;
+  onOpenAboutModal: () => void;
   scheduledTime: string;
   isDeepWork: boolean;
   onToggleDeepWork: () => void;
@@ -18,6 +19,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   onOpenCreateModal,
+  onOpenAboutModal,
   isDeepWork,
   onToggleDeepWork,
 }) => {
@@ -31,12 +33,14 @@ export const Navbar: React.FC<NavbarProps> = ({
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-8 h-16">
-          {/* Zone 1: Single text element wordmark using exact brand name "Mettleway." */}
+          {/* Zone 1: Single text element wordmark using exact brand name "Mettleway." -> opens About Mettleway. modal */}
           <button
             type="button"
             data-testid="brand-wordmark"
-            onClick={() => setActiveTab('today')}
-            className="text-xl font-extrabold tracking-tight transition-colors whitespace-nowrap shrink-0 cursor-pointer focus:outline-none text-white hover:text-amber-400"
+            aria-haspopup="dialog"
+            title="About Mettleway."
+            onClick={onOpenAboutModal}
+            className="text-xl font-extrabold tracking-tight transition-colors whitespace-nowrap shrink-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded-md px-1 -ml-1 text-white hover:text-amber-400"
           >
             Mettleway<span className="text-amber-500">.</span>
           </button>

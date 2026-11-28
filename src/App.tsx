@@ -13,6 +13,7 @@ import { StudentOnboardingModal } from './components/StudentOnboardingModal';
 import { MyProfileView } from './components/MyProfileView';
 import { MyNotesLibraryView } from './components/MyNotesLibraryView';
 import { LockDailyScheduleModal } from './components/LockDailyScheduleModal';
+import { AboutMettlewayModal } from './components/AboutMettlewayModal';
 import { Tracker, StudySquad, LearnerProfile, DailyLogEntry, NoteTag } from './types';
 import { PRESET_TRACKERS, INITIAL_SQUADS, INITIAL_DAILY_LOGS } from './utils/mockPresets';
 import { soundAlert } from './utils/audioAlert';
@@ -157,9 +158,10 @@ export default function App() {
   // Sound mute state
   const [isMuted, setIsMuted] = useState<boolean>(() => soundAlert.isMuted);
 
-  // Create Modal, Lock Schedule Modal & Onboarding Modal state
+  // Create Modal, Lock Schedule Modal, About Modal & Onboarding Modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
   const [isLockScheduleModalOpen, setIsLockScheduleModalOpen] = useState<boolean>(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [quickPlaylistUrl, setQuickPlaylistUrl] = useState<string>('');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState<boolean>(() => {
@@ -788,7 +790,7 @@ export default function App() {
     });
     setMettlewaySchedule(updatedSched);
     setActiveTab('today');
-    if (options?.openScheduleModal) {
+    if (options?.openScheduleModal !== false) {
       setIsLockScheduleModalOpen(true);
     } else {
       setIsLockScheduleModalOpen(false);
@@ -983,6 +985,7 @@ export default function App() {
         isMuted={isMuted}
         toggleMute={handleToggleMute}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        onOpenAboutModal={() => setIsAboutModalOpen(true)}
         scheduledTime={mettlewaySchedule.scheduledTime24 || activeTracker?.scheduledTime || '16:00'}
         isDeepWork={isDeepWork}
         onToggleDeepWork={handleToggleDeepWork}
@@ -1398,6 +1401,12 @@ export default function App() {
             showSmoothAlarmToast(toastMessage);
           }
         }}
+      />
+
+      {/* About Mettleway. Modal (Opened by clicking top-left "Mettleway." brand mark) */}
+      <AboutMettlewayModal
+        isOpen={isAboutModalOpen}
+        onClose={() => setIsAboutModalOpen(false)}
       />
 
       {/* Multi-Step Student Onboarding & Registration Modal */}
