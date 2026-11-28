@@ -98,6 +98,13 @@ import {
 } from './calendarExport';
 import { buildSmartConceptFallback } from './aiMentorCache';
 import { PRESET_TRACKERS } from './mockPresets';
+import {
+  searchYouTubeCoursePlaylists,
+  searchCuratedYouTubePlaylists,
+  detectSearchOrUrlMode,
+  discoverYouTubePlaylist,
+  sanitizeSafeHttpsUrl,
+} from './youtubePlaylistDiscovery';
 import { StudyTask } from '../types';
 
 describe('Unit Tests: Deep Work Mode State Machine (TDD)', () => {
@@ -1869,6 +1876,125 @@ describe('Unit Tests: Student Onboarding, Personalized Profile & Course-Based Pe
       buildMettlewayFeedbackMailtoUrl(),
       'mailto:YOUR_EMAIL@gmail.com?subject=Mettleway.%20Learner%20Suggestion'
     );
+  });
+
+  test('16. Direct YouTube Course Search (YouTube Data API v3, Curated Fallback, URL Sanitization & Dual-Mode Detection)', async () => {
+    // 1. Dual-mode detection accurately distinguishes URLs from topic queries
+    assert.equal(
+      detectSearchOrUrlMode('https://www.youtube.com/playlist?list=PLgUwDviBIf0oF6QL8m22w1hIDC1vJ_BHz'),
+      'url'
+    );
+    assert.equal(detectSearchOrUrlMode('https://youtu.be/kBdlM6hNDAE'), 'url');
+    assert.equal(detectSearchOrUrlMode('Python Full Course'), 'search');
+    assert.equal(detectSearchOrUrlMode('React JS'), 'search');
+    assert.equal(detectSearchOrUrlMode('DSA'), 'search');
+
+    // 2. Live YouTube Data API v3 search builds the exact expected endpoint and sanitizes unsafe URLs/entities
+    let capturedEndpoint = '';
+    const mockApiFetch = async (url: string) => {
+      capturedEndpoint = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          items: [
+            {
+              id: { playlistId: 'PLvalidReactCourse001' },
+              snippet: {
+                title: 'React JS &amp; Hooks Full Course',
+                channelTitle: 'Code &amp; Architecture',
+                description: 'Master React &quot;Hooks&quot; &amp; Context API',
+                thumbnails: {
+                  high: { url: 'https://i.ytimg.com/vi/RGKi6LSPDLU/hqdefault.jpg' },
+                },
+              },
+            },
+            {
+              id: { playlistId: 'PLunsafeThumbPlaylist2' },
+              snippet: {
+                title: 'Unsafe Thumb Test',
+                channelTitle: 'Tester',
+                thumbnails: {
+                  high: { url: 'javascript:alert(1)' },
+                },
+              },
+            },
+            {
+              id: { playlistId: 'bad' }, // too short / invalid -> skipped
+              snippet: { title: 'Should be skipped' },
+            },
+          ],
+        }),
+        text: async () => '',
+      };
+    };
+
+    const liveResult = await searchYouTubeCoursePlaylists({
+      query: 'React JS',
+      apiKey: 'test-key-123',
+      maxResults: 8,
+      fetchFn: mockApiFetch,
+    });
+
+    assert.ok(
+      capturedEndpoint.startsWith(
+        'https://www.googleapis.com/youtube/v3/search?part=snippet&type=playlist&maxResults=8&q=React%20JS&key=test-key-123'
+      )
+    );
+    assert.equal(liveResult.source, 'youtube_api');
+    assert.equal(liveResult.results.length, 2);
+    assert.equal(liveResult.results[0].title, 'React JS & Hooks Full Course');
+    assert.equal(liveResult.results[0].channelTitle, 'Code & Architecture');
+    assert.equal(
+      liveResult.results[0].thumbnail,
+      'https://i.ytimg.com/vi/RGKi6LSPDLU/hqdefault.jpg'
+    );
+    // Unsafe javascript: thumbnail must be replaced with safe HTTPS fallback
+    assert.ok(liveResult.results[1].thumbnail.startsWith('https://'));
+    assert.equal(
+      sanitizeSafeHttpsUrl('javascript:alert(1)', 'https://example.com/fallback.jpg'),
+      'https://example.com/fallback.jpg'
+    );
+
+    // 3. Quota exceeded (403) falls back cleanly to curated playlists
+    const mockQuotaFetch = async () => ({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: { errors: [{ reason: 'quotaExceeded' }] },
+      }),
+      text: async () => '',
+    });
+
+    const quotaFallback = await searchYouTubeCoursePlaylists({
+      query: 'Python Full Course',
+      apiKey: 'test-key-123',
+      fetchFn: mockQuotaFetch,
+    });
+    assert.equal(quotaFallback.source, 'curated_fallback');
+    assert.ok(quotaFallback.results.length >= 2);
+    assert.ok(
+      quotaFallback.results.some(r => r.title.toLowerCase().includes('python')),
+      'Python Full Course search must return curated Python playlists'
+    );
+
+    // 4. Missing API key returns relevant curated playlists for React JS and DSA, and every curated playlist imports cleanly
+    const reactFallback = await searchYouTubeCoursePlaylists({ query: 'React JS', apiKey: '' });
+    assert.equal(reactFallback.source, 'curated_fallback');
+    assert.ok(reactFallback.results.some(r => r.title.toLowerCase().includes('react')));
+
+    const dsaFallback = searchCuratedYouTubePlaylists('DSA', 8);
+    assert.ok(dsaFallback.some(r => r.title.toLowerCase().includes('dsa')));
+
+    // Verify clicking Enroll on a curated React playlist resolves multi-lesson verified tracks
+    const discoveredReact = await discoverYouTubePlaylist({
+      inputUrl: `https://www.youtube.com/playlist?list=${reactFallback.results[0].playlistId}`,
+      apiKey: '',
+      fetchFn: async () => ({ ok: false, status: 503, json: async () => ({}), text: async () => '' }),
+    });
+    assert.equal(discoveredReact.status, 'playlist_found');
+    assert.ok(discoveredReact.selectedPlaylist);
+    assert.ok(discoveredReact.selectedPlaylist!.lessons.length >= 5);
   });
 });
 

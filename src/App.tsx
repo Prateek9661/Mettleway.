@@ -65,7 +65,19 @@ import {
   Users,
   UserPlus,
   Youtube,
+  Search,
+  Loader2,
 } from 'lucide-react';
+import {
+  YouTubePlaylistSearchItem,
+  detectSearchOrUrlMode,
+} from './utils/youtubePlaylistDiscovery';
+import {
+  YouTubeCourseSearchResults,
+  QUICK_COURSE_SEARCH_TOPICS,
+  fetchYouTubeCourseSearch,
+  enrollSearchedPlaylistToTracker,
+} from './components/YouTubeCourseSearchResults';
 
 export default function App() {
   // Navigation tab state
@@ -163,6 +175,16 @@ export default function App() {
   const [isLockScheduleModalOpen, setIsLockScheduleModalOpen] = useState<boolean>(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
   const [quickPlaylistUrl, setQuickPlaylistUrl] = useState<string>('');
+  const [headerInputMode, setHeaderInputMode] = useState<'search' | 'url'>('search');
+  const [isHeaderSearchModalOpen, setIsHeaderSearchModalOpen] = useState<boolean>(false);
+  const [headerSearchQuery, setHeaderSearchQuery] = useState<string>('');
+  const [headerSearchResults, setHeaderSearchResults] = useState<YouTubePlaylistSearchItem[]>([]);
+  const [headerSearchSource, setHeaderSearchSource] = useState<'youtube_api' | 'curated_fallback'>(
+    'curated_fallback'
+  );
+  const [headerSearchNotice, setHeaderSearchNotice] = useState<string | undefined>(undefined);
+  const [isHeaderSearching, setIsHeaderSearching] = useState<boolean>(false);
+  const [headerEnrollingPlaylistId, setHeaderEnrollingPlaylistId] = useState<string | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState<boolean>(() => {
     try {
@@ -174,6 +196,18 @@ export default function App() {
   const [onboardingInitialMode, setOnboardingInitialMode] = useState<'register' | 'onboarding'>(
     'onboarding'
   );
+
+  // Close header course search modal on Escape key
+  useEffect(() => {
+    if (!isHeaderSearchModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !headerEnrollingPlaylistId) {
+        setIsHeaderSearchModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isHeaderSearchModalOpen, headerEnrollingPlaylistId]);
 
   // Mettleway. Daily Class Schedule & Attendance Streak state (persisted under `mettleway_schedule`)
   const [mettlewaySchedule, setMettlewaySchedule] = useState<MettlewayScheduleData>(() =>
@@ -815,6 +849,58 @@ export default function App() {
     setQuickPlaylistUrl('');
   };
 
+  // Run direct YouTube course topic search from the main dashboard header bar
+  const handleRunHeaderCourseSearch = async (rawQuery: string) => {
+    const trimmed = rawQuery.trim();
+    if (trimmed && detectSearchOrUrlMode(trimmed) === 'url') {
+      setIsHeaderSearchModalOpen(false);
+      handleQuickPastePlaylist(trimmed);
+      return;
+    }
+    setHeaderSearchQuery(trimmed);
+    setIsHeaderSearchModalOpen(true);
+    setIsHeaderSearching(true);
+    const resp = await fetchYouTubeCourseSearch(trimmed);
+    setHeaderSearchResults(resp.results);
+    setHeaderSearchSource(resp.source);
+    setHeaderSearchNotice(resp.notice);
+    setIsHeaderSearching(false);
+  };
+
+  // Enroll a searched playlist into a new Mettleway. course roadmap & immediately open LockDailyScheduleModal
+  const handleEnrollHeaderSearchedPlaylist = async (playlist: YouTubePlaylistSearchItem) => {
+    setHeaderEnrollingPlaylistId(playlist.playlistId);
+    try {
+      const tracker = await enrollSearchedPlaylistToTracker(playlist, {
+        dailyMinutes: mettlewaySchedule.durationMinutes || 60,
+        scheduledTime: mettlewaySchedule.scheduledTime24 || '16:00',
+        studyDays: [1, 2, 3, 4, 5, 6],
+      });
+      setIsHeaderSearchModalOpen(false);
+      setQuickPlaylistUrl('');
+      handleSaveTracker(tracker, { openScheduleModal: true });
+    } finally {
+      setHeaderEnrollingPlaylistId(null);
+    }
+  };
+
+  // Handle Dual-Mode submission from the main header bar
+  const handleHeaderDualModeSubmit = (rawInput: string) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) {
+      if (headerInputMode === 'search') {
+        handleRunHeaderCourseSearch('');
+      }
+      return;
+    }
+    if (detectSearchOrUrlMode(trimmed) === 'url') {
+      handleQuickPastePlaylist(trimmed);
+    } else {
+      setHeaderInputMode('search');
+      handleRunHeaderCourseSearch(trimmed);
+    }
+  };
+
   // Update schedule configuration & smoothly return to main platform page when saved
   const handleUpdateSchedule = (
     newTime: string,
@@ -1026,37 +1112,90 @@ export default function App() {
                 ))}
               </select>
 
-              {/* Quick Paste YouTube Playlist Input to Create Roadmap & Open Lock Schedule Modal */}
-              <div className="relative flex items-center">
-                <Youtube className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 pointer-events-none" />
-                <input
-                  type="text"
-                  data-testid="quick-paste-playlist-input"
-                  value={quickPlaylistUrl}
-                  onChange={e => {
-                    const val = e.target.value;
-                    setQuickPlaylistUrl(val);
-                    if (/youtu\.?be/i.test(val.trim())) {
-                      handleQuickPastePlaylist(val);
+              {/* Dual-Mode Search & Import Bar: Search Courses OR Paste Playlist URL */}
+              <div
+                data-testid="header-dual-mode-bar"
+                className="flex flex-wrap items-center gap-1.5 bg-zinc-900 border border-zinc-700/90 rounded-xl p-1"
+              >
+                <div className="flex items-center bg-zinc-950 rounded-lg p-0.5 border border-zinc-800">
+                  <button
+                    type="button"
+                    data-testid="header-mode-search-btn"
+                    onClick={() => setHeaderInputMode('search')}
+                    className={`px-2 py-1 rounded-md text-[11px] font-extrabold transition-colors cursor-pointer whitespace-nowrap ${
+                      headerInputMode === 'search'
+                        ? 'bg-amber-500 text-zinc-950'
+                        : 'text-zinc-400 hover:text-zinc-100'
+                    }`}
+                  >
+                    🔍 Search Courses
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="header-mode-url-btn"
+                    onClick={() => setHeaderInputMode('url')}
+                    className={`px-2 py-1 rounded-md text-[11px] font-extrabold transition-colors cursor-pointer whitespace-nowrap ${
+                      headerInputMode === 'url'
+                        ? 'bg-amber-500 text-zinc-950'
+                        : 'text-zinc-400 hover:text-zinc-100'
+                    }`}
+                  >
+                    🔗 Paste Playlist URL
+                  </button>
+                </div>
+
+                <div className="relative flex items-center">
+                  {headerInputMode === 'search' ? (
+                    <Search className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 pointer-events-none" />
+                  ) : (
+                    <Youtube className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 pointer-events-none" />
+                  )}
+                  <input
+                    type="text"
+                    data-testid="quick-paste-playlist-input"
+                    value={quickPlaylistUrl}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setQuickPlaylistUrl(val);
+                      if (headerInputMode === 'url' && /youtu\.?be/i.test(val.trim())) {
+                        handleQuickPastePlaylist(val);
+                      }
+                    }}
+                    onPaste={e => {
+                      const pasted = e.clipboardData?.getData('text') || '';
+                      if (pasted.trim() && detectSearchOrUrlMode(pasted) === 'url') {
+                        e.preventDefault();
+                        handleQuickPastePlaylist(pasted);
+                      }
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleHeaderDualModeSubmit(quickPlaylistUrl);
+                      }
+                    }}
+                    placeholder={
+                      headerInputMode === 'search'
+                        ? 'Search Python Full Course, React JS, DSA...'
+                        : 'Paste YouTube playlist URL...'
                     }
-                  }}
-                  onPaste={e => {
-                    const pasted = e.clipboardData?.getData('text') || '';
-                    if (pasted.trim()) {
-                      e.preventDefault();
-                      handleQuickPastePlaylist(pasted);
+                    aria-label={
+                      headerInputMode === 'search'
+                        ? 'Search YouTube courses by topic'
+                        : 'Paste YouTube playlist URL to create roadmap'
                     }
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && quickPlaylistUrl.trim()) {
-                      e.preventDefault();
-                      handleQuickPastePlaylist(quickPlaylistUrl);
-                    }
-                  }}
-                  placeholder="Paste YouTube playlist to lock daily class..."
-                  aria-label="Paste YouTube playlist to create roadmap"
-                  className="bg-zinc-900 border border-zinc-700 focus:border-amber-500 text-zinc-100 placeholder-zinc-400 rounded-lg pl-8 pr-2.5 py-1 text-xs w-56 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                />
+                    className="bg-zinc-950 border border-zinc-800 focus:border-amber-500 text-zinc-100 placeholder-zinc-400 rounded-lg pl-8 pr-2.5 py-1 text-xs w-56 sm:w-64 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  data-testid="header-course-search-submit"
+                  onClick={() => handleHeaderDualModeSubmit(quickPlaylistUrl)}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-extrabold text-[11px] transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {headerInputMode === 'search' ? 'Search' : 'Import'}
+                </button>
               </div>
 
               {/* Dashboard Header Status Badge: "⚡ Daily Class: 04:00 PM | Attendance Streak" */}
@@ -1366,6 +1505,113 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* In-App YouTube Course Discovery Modal (Obsidian Dark + Forge Amber) */}
+      {isHeaderSearchModalOpen && (
+        <div
+          data-testid="header-course-search-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/80 backdrop-blur-xs"
+          onClick={e => {
+            if (e.target === e.currentTarget && !headerEnrollingPlaylistId) {
+              setIsHeaderSearchModalOpen(false);
+            }
+          }}
+        >
+          <div className="bg-zinc-950 text-zinc-100 rounded-2xl border border-zinc-800 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">
+                  Search &amp; Discover YouTube Courses on Mettleway
+                  <span className="text-amber-400">.</span>
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Pick any YouTube course playlist to import its lectures and immediately lock your daily Google Calendar class alarm.
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close course search"
+                disabled={Boolean(headerEnrollingPlaylistId)}
+                onClick={() => setIsHeaderSearchModalOpen(false)}
+                className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Search Input & Quick Topic Row */}
+            <div className="px-5 py-4 border-b border-zinc-800/80 bg-zinc-900/40 space-y-3">
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  handleRunHeaderCourseSearch(headerSearchQuery);
+                }}
+                className="flex flex-col sm:flex-row gap-2"
+              >
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-3 pointer-events-none" />
+                  <input
+                    type="text"
+                    data-testid="header-modal-search-input"
+                    value={headerSearchQuery}
+                    onChange={e => setHeaderSearchQuery(e.target.value)}
+                    placeholder="Search topics (Python Full Course, React JS, DSA) or paste a YouTube playlist URL..."
+                    className="w-full text-xs sm:text-sm pl-10 pr-3 py-2.5 bg-zinc-900 border border-zinc-700 focus:border-amber-500 rounded-xl text-zinc-100 placeholder-zinc-400 focus:ring-2 focus:ring-amber-500/40 focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  data-testid="header-modal-search-submit"
+                  disabled={isHeaderSearching}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-extrabold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-60"
+                >
+                  {isHeaderSearching ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Search className="w-4 h-4" />
+                  )}
+                  <span>Search Courses</span>
+                </button>
+              </form>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-zinc-400 mr-1">
+                  Popular topics:
+                </span>
+                {QUICK_COURSE_SEARCH_TOPICS.map(topic => (
+                  <button
+                    key={topic}
+                    type="button"
+                    onClick={() => handleRunHeaderCourseSearch(topic)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                      headerSearchQuery.toLowerCase() === topic.toLowerCase()
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                        : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300'
+                    }`}
+                  >
+                    {topic}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Scrollable Obsidian Dark Results Grid */}
+            <div className="p-5 overflow-y-auto flex-1">
+              <YouTubeCourseSearchResults
+                results={headerSearchResults}
+                isLoading={isHeaderSearching}
+                enrollingPlaylistId={headerEnrollingPlaylistId}
+                query={headerSearchQuery}
+                source={headerSearchSource}
+                notice={headerSearchNotice}
+                onEnrollPlaylist={handleEnrollHeaderSearchedPlaylist}
+                columns={3}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create / Import Tracker Modal */}
       <CreateTrackerModal

@@ -17,6 +17,8 @@ import {
   importManualMultipleVideoUrls,
   buildTrackerFromVerifiedLessons,
   PLAYLIST_FALLBACK_MESSAGE,
+  searchYouTubeCoursePlaylists,
+  searchCuratedYouTubePlaylists,
 } from './src/utils/youtubePlaylistDiscovery';
 
 dotenv.config();
@@ -278,6 +280,45 @@ app.post('/api/youtube/discover', async (req, res) => {
     });
   }
 });
+
+// Endpoint: Direct YouTube Course Playlist Search (YouTube Data API v3 + curated fallback)
+async function handleYouTubeCourseSearch(req: express.Request, res: express.Response) {
+  const rawQuery = req.method === 'GET' ? req.query?.q : (req.body?.query ?? req.body?.q ?? '');
+  if (rawQuery !== undefined && typeof rawQuery !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: 'Search query must be a text string.',
+    });
+  }
+  const cleanQuery = String(rawQuery || '').trim().slice(0, 120);
+
+  try {
+    const searchData = await withTimeout(
+      searchYouTubeCoursePlaylists({
+        query: cleanQuery,
+        apiKey: process.env.YOUTUBE_API_KEY,
+        maxResults: 8,
+      }),
+      4500,
+      'YouTube playlist search timed out'
+    );
+    return res.json({
+      success: true,
+      ...searchData,
+    });
+  } catch {
+    return res.json({
+      success: true,
+      query: cleanQuery,
+      source: 'curated_fallback',
+      notice: 'Showing Mettleway. curated top playlists ready for instant enrollment.',
+      results: searchCuratedYouTubePlaylists(cleanQuery, 8),
+    });
+  }
+}
+
+app.get('/api/youtube/search', handleYouTubeCourseSearch);
+app.post('/api/youtube/search', handleYouTubeCourseSearch);
 
 // Endpoint: Manual Multiple-Video URL Import
 app.post('/api/youtube/import-manual', async (req, res) => {

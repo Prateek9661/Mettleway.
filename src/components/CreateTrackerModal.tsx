@@ -13,6 +13,7 @@ import {
   Layers,
   CheckCircle2,
   Link2,
+  Search,
 } from 'lucide-react';
 import {
   Tracker,
@@ -35,7 +36,15 @@ import {
   importManualMultipleVideoUrls,
   buildTrackerFromVerifiedLessons,
   PLAYLIST_FALLBACK_MESSAGE,
+  YouTubePlaylistSearchItem,
+  detectSearchOrUrlMode,
 } from '../utils/youtubePlaylistDiscovery';
+import {
+  YouTubeCourseSearchResults,
+  QUICK_COURSE_SEARCH_TOPICS,
+  fetchYouTubeCourseSearch,
+  enrollSearchedPlaylistToTracker,
+} from './YouTubeCourseSearchResults';
 
 import { soundAlert } from '../utils/audioAlert';
 
@@ -100,7 +109,37 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
   const [loadingStep, setLoadingStep] = useState<string>('');
   const [inlineAlarmLocked, setInlineAlarmLocked] = useState<boolean>(false);
 
+  // Dual-mode Search Courses vs Paste Playlist URL state
+  const [inputMode, setInputMode] = useState<'search' | 'url'>('search');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [lastSearchedQuery, setLastSearchedQuery] = useState<string>('');
+  const [searchResults, setSearchResults] = useState<YouTubePlaylistSearchItem[]>([]);
+  const [searchSource, setSearchSource] = useState<'youtube_api' | 'curated_fallback'>(
+    'curated_fallback'
+  );
+  const [searchNotice, setSearchNotice] = useState<string | undefined>(undefined);
+  const [isSearchingCourses, setIsSearchingCourses] = useState<boolean>(false);
+  const [enrollingPlaylistId, setEnrollingPlaylistId] = useState<string | null>(null);
+
   const parsedInputSource = React.useMemo(() => parseYouTubeSourceUrl(inputUrl.trim()), [inputUrl]);
+
+  // Load curated top YouTube playlists immediately when opening the Search Courses tab
+  useEffect(() => {
+    if (!isOpen || inputMode !== 'search' || searchResults.length > 0) return;
+    let cancelled = false;
+    setIsSearchingCourses(true);
+    fetchYouTubeCourseSearch('').then(resp => {
+      if (cancelled) return;
+      setSearchResults(resp.results);
+      setSearchSource(resp.source);
+      setSearchNotice(resp.notice);
+      setLastSearchedQuery('');
+      setIsSearchingCourses(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, inputMode, searchResults.length]);
 
   // Smart YouTube Playlist Discovery whenever user pastes/types a YouTube video or playlist URL
   useEffect(() => {
@@ -193,6 +232,42 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
     setSuccessMsg(null);
   };
 
+  const handleRunCourseSearch = async (overrideQuery?: string) => {
+    const q = (overrideQuery !== undefined ? overrideQuery : searchQuery).trim();
+    if (q && detectSearchOrUrlMode(q) === 'url') {
+      setInputMode('url');
+      setInputUrl(q);
+      setErrorMsg(null);
+      return;
+    }
+    setErrorMsg(null);
+    setIsSearchingCourses(true);
+    const resp = await fetchYouTubeCourseSearch(q);
+    setSearchResults(resp.results);
+    setSearchSource(resp.source);
+    setSearchNotice(resp.notice);
+    setLastSearchedQuery(q);
+    setIsSearchingCourses(false);
+  };
+
+  const handleEnrollSearchedPlaylist = async (playlist: YouTubePlaylistSearchItem) => {
+    setErrorMsg(null);
+    setEnrollingPlaylistId(playlist.playlistId);
+    try {
+      const tracker = await enrollSearchedPlaylistToTracker(playlist, {
+        dailyMinutes,
+        scheduledTime,
+        studyDays: selectedDays.length > 0 ? selectedDays : [1, 2, 3, 4, 5, 6],
+      });
+      onSaveTracker(tracker, { openScheduleModal: true });
+      resetAndClose();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to import selected YouTube playlist.');
+    } finally {
+      setEnrollingPlaylistId(null);
+    }
+  };
+
   const resetAndClose = () => {
     setCourseTopic('');
     setUserEditedTopic(false);
@@ -204,6 +279,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
     setSuccessMsg(null);
     setIsLoading(false);
     setImportProgressPercent(0);
+    setEnrollingPlaylistId(null);
     onClose();
   };
 
@@ -436,24 +512,72 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-xl w-full p-6 space-y-5 relative max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/75 backdrop-blur-xs">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full p-6 space-y-5 relative max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-zinc-950 text-amber-400 rounded-xl border border-amber-500/30">
               <Sparkles className="w-4 h-4" />
             </div>
-            <h2 className="text-lg font-bold text-slate-900">
-              Add New YouTube Course / Study Track
-            </h2>
+            <div>
+              <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">
+                Add Course to Mettleway<span className="text-amber-500">.</span>
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                Search YouTube playlists directly or paste any playlist URL to lock your daily class.
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={resetAndClose}
-            className="p-1 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer"
+            aria-label="Close modal"
+            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Dual-Mode Toggle: Search Courses vs Paste Playlist URL */}
+        <div
+          role="tablist"
+          aria-label="Course discovery mode"
+          className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-zinc-950 border border-zinc-800"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={inputMode === 'search'}
+            data-testid="create-mode-search-tab"
+            onClick={() => {
+              setInputMode('search');
+              setErrorMsg(null);
+            }}
+            className={`py-2 px-3 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              inputMode === 'search'
+                ? 'bg-amber-500 text-zinc-950 shadow-sm'
+                : 'text-zinc-300 hover:text-white hover:bg-zinc-900'
+            }`}
+          >
+            <span>🔍 Search Courses</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={inputMode === 'url'}
+            data-testid="create-mode-url-tab"
+            onClick={() => {
+              setInputMode('url');
+              setErrorMsg(null);
+            }}
+            className={`py-2 px-3 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              inputMode === 'url'
+                ? 'bg-amber-500 text-zinc-950 shadow-sm'
+                : 'text-zinc-300 hover:text-white hover:bg-zinc-900'
+            }`}
+          >
+            <span>🔗 Paste Playlist URL</span>
           </button>
         </div>
 
@@ -474,6 +598,90 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
           </div>
         )}
 
+        {/* TAB 1: IN-APP YOUTUBE COURSE SEARCH (OBSIDIAN DARK) */}
+        {inputMode === 'search' ? (
+          <div
+            data-testid="create-modal-search-panel"
+            className="rounded-2xl bg-zinc-950 border border-zinc-800 p-4 sm:p-5 space-y-4 text-zinc-100"
+          >
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                handleRunCourseSearch();
+              }}
+              className="flex flex-col sm:flex-row gap-2"
+            >
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-3 pointer-events-none" />
+                <input
+                  type="text"
+                  data-testid="create-modal-search-input"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onPaste={e => {
+                    const pasted = e.clipboardData?.getData('text') || '';
+                    if (pasted.trim() && detectSearchOrUrlMode(pasted) === 'url') {
+                      e.preventDefault();
+                      setInputMode('url');
+                      setInputUrl(pasted.trim());
+                    }
+                  }}
+                  placeholder="Search topics: Python Full Course, React JS, DSA, DBMS..."
+                  className="w-full text-xs sm:text-sm pl-10 pr-3 py-2.5 bg-zinc-900 border border-zinc-700 focus:border-amber-500 rounded-xl text-zinc-100 placeholder-zinc-400 focus:ring-2 focus:ring-amber-500/40 focus:outline-none"
+                />
+              </div>
+              <button
+                type="submit"
+                data-testid="create-modal-search-submit"
+                disabled={isSearchingCourses}
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-extrabold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-60"
+              >
+                {isSearchingCourses ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Search className="w-4 h-4" />
+                )}
+                <span>Search YouTube</span>
+              </button>
+            </form>
+
+            {/* Quick topic picks */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-zinc-400 mr-1">
+                Quick topics:
+              </span>
+              {QUICK_COURSE_SEARCH_TOPICS.slice(0, 6).map(topic => (
+                <button
+                  key={topic}
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery(topic);
+                    handleRunCourseSearch(topic);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                    lastSearchedQuery.toLowerCase() === topic.toLowerCase()
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-amber-500/50 hover:text-amber-300'
+                  }`}
+                >
+                  {topic}
+                </button>
+              ))}
+            </div>
+
+            {/* Discovered YouTube Playlists Grid */}
+            <YouTubeCourseSearchResults
+              results={searchResults}
+              isLoading={isSearchingCourses}
+              enrollingPlaylistId={enrollingPlaylistId}
+              query={lastSearchedQuery}
+              source={searchSource}
+              notice={searchNotice}
+              onEnrollPlaylist={handleEnrollSearchedPlaylist}
+              columns={2}
+            />
+          </div>
+        ) : (
         <form onSubmit={handleGenerate} className="space-y-4">
           {/* Resource URL input */}
           <div>
@@ -969,6 +1177,7 @@ export const CreateTrackerModal: React.FC<CreateTrackerModalProps> = ({
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );

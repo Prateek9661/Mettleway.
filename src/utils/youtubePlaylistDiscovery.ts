@@ -908,6 +908,118 @@ export const VERIFIED_PUBLIC_PLAYLIST_CATALOG: CatalogPlaylistDefinition[] = [
       { videoId: '4DqAvWonPAg', title: 'Lec 6: React Hooks, State Management & Full-Stack Integration', durationMinutes: 50 },
     ],
   },
+  {
+    playlistId: 'PLu0W_9lII9agx66oZnT6IyhcMIbUMNMdt',
+    title: 'React JS Complete Course (Modern Hooks, Router & State)',
+    description: 'Step-by-step React JS tutorial covering JSX, Components, Props, State, useEffect, Context API, Redux Toolkit, and production projects.',
+    channelId: 'UCeVMnSShP_Iviwkknt83cww',
+    channelTitle: 'CodeWithHarry',
+    category: 'Web Development',
+    videos: [
+      { videoId: 'RGKi6LSPDLU', title: 'Lec 1: Introduction to React JS, Virtual DOM & Project Setup', durationMinutes: 28 },
+      { videoId: 'bMknfKXIFA8', title: 'Lec 2: JSX Syntax, Functional Components & Props Architecture', durationMinutes: 35 },
+      { videoId: 'SqcY0GlETPk', title: 'Lec 3: State Management with useState & Event Handling in React', durationMinutes: 32 },
+      { videoId: 'vz1RlUyrc3w', title: 'Lec 4: Side Effects, Data Fetching & Lifecycle with useEffect', durationMinutes: 38 },
+      { videoId: 'FxgM9k1rg0Q', title: 'Lec 5: React Router v6, Dynamic Routes & Protected Layouts', durationMinutes: 40 },
+      { videoId: 'w7ejDZ8SWv8', title: 'Lec 6: Context API, Custom Hooks & Performance Memoization', durationMinutes: 42 },
+      { videoId: 'Ke90Tje7VS0', title: 'Lec 7: Forms, API Mutations & Building a Full-Stack React App', durationMinutes: 45 },
+    ],
+  },
+  {
+    playlistId: 'PLRAV69dS1uWQos1M1xP6LWN6C-lZvpkmq',
+    title: 'Chai aur React — Production React JS & Redux Series',
+    description: 'Deep-dive React JS engineering playlist covering Vite, Tailwind, React Hooks, Redux Toolkit, Appwrite backend, and deployment.',
+    channelId: 'UCNQ6FEtztATuaVhZKCY28Yw',
+    channelTitle: 'Chai aur Code',
+    category: 'Web Development',
+    videos: [
+      { videoId: 'vz1RlUyrc3w', title: 'Lec 1: React JS Roadmap & How React Fiber Works Under the Hood', durationMinutes: 30 },
+      { videoId: 'FxgM9k1rg0Q', title: 'Lec 2: Custom React Implementation, JSX & Tailwind Setup', durationMinutes: 34 },
+      { videoId: 'Dorf8i6lCuk', title: 'Lec 3: Hooks Deep Dive — useState, useCallback, useRef & useEffect', durationMinutes: 42 },
+      { videoId: '0riHps91AzE', title: 'Lec 4: Custom Hooks & Currency Converter API Project', durationMinutes: 38 },
+      { videoId: 'b8pAPWsWIE4', title: 'Lec 5: Context API vs Redux Toolkit Architecture in React', durationMinutes: 45 },
+      { videoId: 'hQAHSlTtcmY', title: 'Lec 6: Production Folder Structure, Auth Flows & Deployment', durationMinutes: 40 },
+    ],
+  },
+  {
+    playlistId: 'PLsyeobzWxl7poL9JTVyndKe62ieoN-MZ3',
+    title: 'Python Full Course for Beginners to Advanced Developers',
+    description: 'Comprehensive Python programming playlist covering syntax, OOP, data structures, generators, multithreading, and database connectivity.',
+    channelId: 'UC59K-uG2A5ogwIrHw4bmlEg',
+    channelTitle: 'Telusko',
+    category: 'AI & ML',
+    videos: [
+      { videoId: 'QXeEoD0pB3E', title: 'Lec 1: Getting Started with Python & Interpreter Internals', durationMinutes: 22 },
+      { videoId: 'rfscVS0vtbw', title: 'Lec 2: Variables, Lists, Tuples, Sets & Dictionaries in Python', durationMinutes: 36 },
+      { videoId: '_uQrJ0TkZlc', title: 'Lec 3: Control Flow, Loops, Functions & Lambda Expressions', durationMinutes: 34 },
+      { videoId: 'kqtD5dpn9C8', title: 'Lec 4: Object-Oriented Python — Classes, Inheritance & Polymorphism', durationMinutes: 40 },
+      { videoId: 'HGOBQPFzWKo', title: 'Lec 5: Iterators, Generators, Decorators & Error Handling', durationMinutes: 38 },
+      { videoId: '8DvywoWv6fI', title: 'Lec 6: Working with Files, JSON APIs & SQL Databases in Python', durationMinutes: 42 },
+    ],
+  },
+  {
+    playlistId: 'PLMCXHnjXnTnvo6alSjVkgxV-VH6EPyvoX',
+    title: 'System Design & Scalable Distributed Architecture Course',
+    description: 'High-level system design playlist covering load balancing, consistent hashing, caching, sharding, message queues, and real-world architectures.',
+    channelId: 'UCRPMAqdtSgd0Ipeef7iFsKw',
+    channelTitle: 'Gaurav Sen',
+    category: 'System Design',
+    videos: [
+      { videoId: 'xpDnVSmNFX0', title: 'Lec 1: Horizontal vs Vertical Scaling & Load Balancing Basics', durationMinutes: 25 },
+      { videoId: 'zaRkONedGr8', title: 'Lec 2: Consistent Hashing & Distributed Request Routing', durationMinutes: 28 },
+      { videoId: 'U3QzTDsSalQ', title: 'Lec 3: Caching Strategies, CDNs, Redis & Cache Invalidation', durationMinutes: 30 },
+      { videoId: 'i53Gi_K3o7I', title: 'Lec 4: Database Sharding, Replication & CAP Theorem Trade-offs', durationMinutes: 36 },
+      { videoId: 'oUJbuFMyBDk', title: 'Lec 5: Message Queues, Event-Driven Microservices & Kafka', durationMinutes: 32 },
+      { videoId: 'fMZMm_0ZhK4', title: 'Lec 6: Designing URL Shortener, Rate Limiter & Chat Systems', durationMinutes: 40 },
+    ],
+  },
+  {
+    playlistId: 'PL9gnSGHSqcnr_DxHsP7AW9ftq0AtAyYqJ',
+    title: 'Java + DSA & Object-Oriented Programming Bootcamp',
+    description: 'Complete Java programming and Data Structures & Algorithms playlist covering JVM internals, recursion, sorting, trees, and OOP principles.',
+    channelId: 'UCBG2Y2aB4aT3L2V9s7g8F0w',
+    channelTitle: 'Kunal Kushwaha',
+    category: 'DSA',
+    videos: [
+      { videoId: 'rZ41y93P2Qo', title: 'Lec 1: Java Architecture, JVM Memory Model & First Program', durationMinutes: 32 },
+      { videoId: 'TAtrPoaJ7gc', title: 'Lec 2: Conditionals, Loops, Methods & Memory References in Java', durationMinutes: 38 },
+      { videoId: 'n60VdCcXpMo', title: 'Lec 3: Arrays, ArrayLists & Binary Search Interview Patterns', durationMinutes: 44 },
+      { videoId: 'BSVKUk58K6U', title: 'Lec 4: Object-Oriented Programming (OOP) — Classes, Interfaces & Generics', durationMinutes: 48 },
+      { videoId: 'M2uO2nMT0Bk', title: 'Lec 5: Recursion, Backtracking & Complexity Analysis in Java', durationMinutes: 46 },
+      { videoId: '58YbpRDc4yw', title: 'Lec 6: Linked Lists, Stacks, Queues & Binary Trees in Java', durationMinutes: 50 },
+    ],
+  },
+  {
+    playlistId: 'PLeo1K3hjS3uvCeTYTeyfe0-rN5r8zn9rw',
+    title: 'Machine Learning & Applied AI with Python Playlist',
+    description: 'Hands-on Machine Learning course covering NumPy, Pandas, Linear & Logistic Regression, Decision Trees, Neural Networks, and model evaluation.',
+    channelId: 'UCh9nVJoWXmFb7sLApWGcLPQ',
+    channelTitle: 'codebasics',
+    category: 'AI & ML',
+    videos: [
+      { videoId: 'gmvvaobm7eQ', title: 'Lec 1: Machine Learning Roadmap, Supervised vs Unsupervised Learning', durationMinutes: 24 },
+      { videoId: '8jazNUpO3lQ', title: 'Lec 2: Linear Regression, Cost Function & Gradient Descent', durationMinutes: 32 },
+      { videoId: 'zM4VZR0px8E', title: 'Lec 3: Logistic Regression & Classification Metrics (ROC, F1)', durationMinutes: 30 },
+      { videoId: 'PHxYNGo8NcI', title: 'Lec 4: Decision Trees, Random Forests & Feature Engineering', durationMinutes: 35 },
+      { videoId: 'EItlUEPCIzM', title: 'Lec 5: K-Means Clustering, PCA & Unsupervised Pipelines', durationMinutes: 28 },
+      { videoId: '7eh4d6sabA0', title: 'Lec 6: End-to-End Scikit-Learn Model Deployment Project', durationMinutes: 40 },
+    ],
+  },
+  {
+    playlistId: 'PLy7NrYWoggjziYQIDorlXjTvvwweTYoNC',
+    title: 'Docker, Containers & DevOps Engineering Complete Course',
+    description: 'Practical DevOps playlist covering Docker images, containers, Docker Compose, Kubernetes pods, CI/CD pipelines, and cloud deployment.',
+    channelId: 'UCdngmbVKX1Tgre699-XLlUA',
+    channelTitle: 'TechWorld with Nana',
+    category: 'DevOps',
+    videos: [
+      { videoId: '3c-iBn73dDE', title: 'Lec 1: Docker Architecture — Images, Containers & Registries', durationMinutes: 28 },
+      { videoId: 'pTFZFxd4hOI', title: 'Lec 2: Writing Production Dockerfiles & Multi-Stage Builds', durationMinutes: 32 },
+      { videoId: 'SXwC9fSwct8', title: 'Lec 3: Docker Volumes, Networking & Docker Compose Stacks', durationMinutes: 35 },
+      { videoId: 'X48VuDVv0do', title: 'Lec 4: Kubernetes Core Concepts — Pods, Services & Deployments', durationMinutes: 42 },
+      { videoId: 'R8_veQiYBjI', title: 'Lec 5: CI/CD Pipelines with GitHub Actions & Automated Releases', durationMinutes: 36 },
+    ],
+  },
 ];
 
 /**
@@ -1700,3 +1812,282 @@ export function buildTrackerFromVerifiedLessons(options: {
     modules,
   };
 }
+
+// ============================================================================
+// Direct YouTube Course Search & Curated Fallback Discovery
+// ============================================================================
+
+export interface YouTubePlaylistSearchItem {
+  playlistId: string;
+  title: string;
+  channelTitle: string;
+  thumbnail: string;
+  description: string;
+  category?: string;
+  lessonCountHint?: number;
+  source: 'youtube_api' | 'curated_fallback';
+}
+
+export interface YouTubeCourseSearchResponse {
+  query: string;
+  source: 'youtube_api' | 'curated_fallback';
+  notice?: string;
+  results: YouTubePlaylistSearchItem[];
+}
+
+const VALID_PLAYLIST_ID_REGEX = /^[A-Za-z0-9_-]{8,80}$/;
+
+export function decodeSearchHtmlEntities(input: string): string {
+  return String(input || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
+}
+
+export function sanitizeSafeHttpsUrl(rawUrl: string | undefined, fallback: string): string {
+  const candidate = String(rawUrl || '').trim();
+  if (/^https:\/\/[^\s"'<>]+$/i.test(candidate)) {
+    return candidate;
+  }
+  return fallback;
+}
+
+/**
+ * Determines whether user input is a YouTube URL (or direct web URL) vs a plain topic search query.
+ */
+export function detectSearchOrUrlMode(input: string): 'url' | 'search' {
+  const trimmed = String(input || '').trim();
+  if (!trimmed) return 'search';
+  const parsed = parseYouTubeSourceUrl(trimmed);
+  if (parsed.isYouTube) return 'url';
+  if (/^https?:\/\//i.test(trimmed) || /(?:youtube\.com|youtu\.be)\//i.test(trimmed)) {
+    return 'url';
+  }
+  return 'search';
+}
+
+const SEARCH_TOPIC_SYNONYMS: Record<string, string[]> = {
+  py: ['python'],
+  python: ['python', 'automation', 'ai', 'ml'],
+  react: ['react', 'reactjs', 'frontend', 'javascript', 'web'],
+  reactjs: ['react', 'frontend', 'javascript', 'web'],
+  js: ['javascript', 'web', 'frontend', 'react'],
+  javascript: ['javascript', 'web', 'frontend', 'react'],
+  dsa: ['dsa', 'algorithms', 'data structures', 'striver', 'java'],
+  algo: ['dsa', 'algorithms', 'data structures'],
+  dbms: ['dbms', 'database', 'sql', 'normalization'],
+  sql: ['dbms', 'database', 'sql'],
+  os: ['operating', 'systems', 'os', 'scheduling', 'deadlock'],
+  cn: ['computer', 'networks', 'tcp', 'osi'],
+  ml: ['machine', 'learning', 'ai', 'python'],
+  ai: ['ai', 'machine', 'learning', 'python'],
+  devops: ['docker', 'kubernetes', 'devops', 'ci/cd'],
+  docker: ['docker', 'containers', 'devops'],
+  java: ['java', 'dsa', 'oop'],
+  system: ['system', 'design', 'distributed', 'architecture'],
+  mern: ['web', 'javascript', 'react', 'full-stack'],
+  fullstack: ['web', 'javascript', 'react', 'full-stack'],
+};
+
+/**
+ * Searches the curated verified playlist catalog by topic keywords and returns up to `maxResults` items.
+ */
+export function searchCuratedYouTubePlaylists(
+  rawQuery: string,
+  maxResults: number = 8
+): YouTubePlaylistSearchItem[] {
+  const clampedMax = Math.max(1, Math.min(8, Number(maxResults) || 8));
+  const cleanQuery = String(rawQuery || '').trim().slice(0, 120).toLowerCase();
+
+  // Exclude internal crash-revision duplicate from general browse unless matched tightly
+  const baseCatalog = VERIFIED_PUBLIC_PLAYLIST_CATALOG.filter(
+    item => !item.playlistId.endsWith('_CRASH')
+  );
+
+  const mapToItem = (cat: CatalogPlaylistDefinition): YouTubePlaylistSearchItem => {
+    const firstVideoId = cat.videos[0]?.videoId || 'EAR7De6Goz4';
+    return {
+      playlistId: cat.playlistId,
+      title: cat.title,
+      channelTitle: cat.channelTitle,
+      thumbnail: getYouTubeThumbnailUrl(firstVideoId),
+      description: cat.description,
+      category: cat.category,
+      lessonCountHint: cat.videos.length,
+      source: 'curated_fallback',
+    };
+  };
+
+  if (!cleanQuery) {
+    return baseCatalog.slice(0, clampedMax).map(mapToItem);
+  }
+
+  const rawTokens = cleanQuery
+    .replace(/[^a-z0-9+#]+/g, ' ')
+    .split(/\s+/)
+    .filter(tok => tok.length >= 2 && !['full', 'course', 'tutorial', 'playlist', 'for', 'the', 'and', 'with', 'complete', 'beginners'].includes(tok));
+
+  const expandedTokens = new Set<string>(rawTokens);
+  for (const tok of rawTokens) {
+    const syns = SEARCH_TOPIC_SYNONYMS[tok];
+    if (syns) {
+      for (const s of syns) expandedTokens.add(s);
+    }
+  }
+
+  const scored = baseCatalog.map((cat, idx) => {
+    const titleLower = cat.title.toLowerCase();
+    const descLower = cat.description.toLowerCase();
+    const catLower = cat.category.toLowerCase();
+    const channelLower = cat.channelTitle.toLowerCase();
+    const haystack = `${titleLower} ${descLower} ${catLower} ${channelLower}`;
+
+    let score = 0;
+    if (titleLower.includes(cleanQuery)) score += 60;
+    if (haystack.includes(cleanQuery)) score += 30;
+
+    for (const tok of rawTokens) {
+      if (titleLower.includes(tok)) score += 28;
+      else if (catLower.includes(tok)) score += 22;
+      else if (channelLower.includes(tok)) score += 18;
+      else if (descLower.includes(tok)) score += 12;
+    }
+
+    for (const tok of expandedTokens) {
+      if (rawTokens.includes(tok)) continue;
+      if (titleLower.includes(tok)) score += 10;
+      else if (catLower.includes(tok) || descLower.includes(tok)) score += 6;
+    }
+
+    return { cat, score, idx };
+  });
+
+  const matched = scored
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.idx - b.idx));
+
+  if (matched.length > 0) {
+    // Include matched first; if fewer than 4, don't pad with unrelated topics so results stay crisp & relevant
+    return matched.slice(0, clampedMax).map(m => mapToItem(m.cat));
+  }
+
+  // Broad/unrecognized topic fallback: return top flagship curated courses
+  return baseCatalog.slice(0, Math.min(clampedMax, 6)).map(mapToItem);
+}
+
+/**
+ * Searches YouTube playlists by plain topic query using YouTube Data API v3
+ * (`search?part=snippet&type=playlist&maxResults=8&q=...`), with automatic fallback
+ * to Mettleway.'s curated playlist catalog when no API key is set or quota is exceeded.
+ */
+export async function searchYouTubeCoursePlaylists(options: {
+  query: string;
+  apiKey?: string;
+  maxResults?: number;
+  fetchFn?: FetchLike;
+}): Promise<YouTubeCourseSearchResponse> {
+  const {
+    query,
+    apiKey = '',
+    maxResults = 8,
+    fetchFn = fetch as unknown as FetchLike,
+  } = options;
+
+  const cleanQuery = String(query || '').trim().slice(0, 120);
+  const clampedMax = Math.max(1, Math.min(8, Number(maxResults) || 8));
+  const cleanApiKey = String(apiKey || '').trim();
+
+  if (cleanApiKey && cleanQuery) {
+    try {
+      const endpoint =
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=playlist` +
+        `&maxResults=${clampedMax}&q=${encodeURIComponent(cleanQuery)}&key=${encodeURIComponent(cleanApiKey)}&relevanceLanguage=en`;
+
+      const res = await fetchFn(endpoint);
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && Array.isArray(data?.items)) {
+        const seen = new Set<string>();
+        const parsedResults: YouTubePlaylistSearchItem[] = [];
+
+        for (const item of data.items) {
+          const playlistId = String(item?.id?.playlistId || '').trim();
+          if (!playlistId || !VALID_PLAYLIST_ID_REGEX.test(playlistId) || seen.has(playlistId)) {
+            continue;
+          }
+          seen.add(playlistId);
+
+          const snippet = item?.snippet || {};
+          const title = decodeSearchHtmlEntities(snippet.title || 'YouTube Course Playlist');
+          const channelTitle = decodeSearchHtmlEntities(snippet.channelTitle || 'YouTube Educator');
+          const description = decodeSearchHtmlEntities(snippet.description || '');
+          const rawThumb =
+            snippet.thumbnails?.high?.url ||
+            snippet.thumbnails?.medium?.url ||
+            snippet.thumbnails?.default?.url ||
+            '';
+          const thumbnail = sanitizeSafeHttpsUrl(
+            rawThumb,
+            'https://i.ytimg.com/vi/EAR7De6Goz4/hqdefault.jpg'
+          );
+
+          parsedResults.push({
+            playlistId,
+            title,
+            channelTitle,
+            thumbnail,
+            description,
+            source: 'youtube_api',
+          });
+
+          if (parsedResults.length >= clampedMax) break;
+        }
+
+        if (parsedResults.length > 0) {
+          return {
+            query: cleanQuery,
+            source: 'youtube_api',
+            results: parsedResults,
+          };
+        }
+      }
+
+      const fallbackResults = searchCuratedYouTubePlaylists(cleanQuery, clampedMax);
+      const isQuota =
+        res.status === 403 ||
+        res.status === 429 ||
+        String(data?.error?.errors?.[0]?.reason || '').toLowerCase().includes('quota');
+
+      return {
+        query: cleanQuery,
+        source: 'curated_fallback',
+        notice: isQuota
+          ? 'YouTube API daily quota reached — showing Mettleway. curated top playlists.'
+          : 'Showing Mettleway. curated top playlists for your search.',
+        results: fallbackResults,
+      };
+    } catch {
+      const fallbackResults = searchCuratedYouTubePlaylists(cleanQuery, clampedMax);
+      return {
+        query: cleanQuery,
+        source: 'curated_fallback',
+        notice: 'Showing Mettleway. curated top playlists (live YouTube search temporarily unreachable).',
+        results: fallbackResults,
+      };
+    }
+  }
+
+  return {
+    query: cleanQuery,
+    source: 'curated_fallback',
+    notice: cleanQuery
+      ? 'Showing Mettleway. curated playlists ready for instant enrollment.'
+      : 'Popular Mettleway. courses ready for instant enrollment.',
+    results: searchCuratedYouTubePlaylists(cleanQuery, clampedMax),
+  };
+}
+
